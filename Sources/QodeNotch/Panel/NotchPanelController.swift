@@ -96,6 +96,15 @@ final class NotchPanelController: NSObject {
             .sink { [weak self] _ in self?.reposition() }
             .store(in: &cancellables)
 
+        // Jumped to terminal/editor/Finder/browser: get out of the way (unless pinned).
+        store.collapseRequested
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in
+                guard let self, !self.store.isPinned else { return }
+                self.collapse(force: true)
+            }
+            .store(in: &cancellables)
+
         store.attentionRequested
             .receive(on: RunLoop.main)
             .sink { [weak self] id in self?.handleAttention(id) }

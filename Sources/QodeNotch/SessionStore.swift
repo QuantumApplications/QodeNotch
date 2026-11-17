@@ -237,11 +237,17 @@ final class SessionStore: ObservableObject {
 
     // MARK: Actions
 
-    private func perform(_ label: String?, _ work: @escaping () async throws -> Void) {
+    /// Fired after an action that moves the user to another app (terminal,
+    /// editor, Finder, browser) succeeded – the notch then closes itself.
+    let collapseRequested = PassthroughSubject<Void, Never>()
+
+    private func perform(_ label: String?, collapse: Bool = false, _ work: @escaping () async throws -> Void) {
         Task {
             do {
                 try await work()
                 if let label { showToast(label) }
+                // Only on success: errors stay visible in the open notch.
+                if collapse { collapseRequested.send() }
             } catch {
                 showToast(error.localizedDescription, error: true)
             }
@@ -283,7 +289,7 @@ final class SessionStore: ObservableObject {
     }
 
     func focus(_ s: ClaudeSession) {
-        perform(nil) { try await SessionActions.focus(s) }
+        perform(nil, collapse: true) { try await SessionActions.focus(s) }
     }
 
     func send(_ s: ClaudeSession, message: String) {
@@ -304,21 +310,21 @@ final class SessionStore: ObservableObject {
 
     func openEditor(_ s: ClaudeSession) {
         let cfg = config
-        perform(nil) { try await SessionActions.openInEditor(path: s.workingDirectory, config: cfg) }
+        perform(nil, collapse: true) { try await SessionActions.openInEditor(path: s.workingDirectory, config: cfg) }
     }
 
     func openGitGui(_ s: ClaudeSession) {
         let cfg = config
-        perform(nil) { try await SessionActions.openInGitGui(path: s.workingDirectory, config: cfg) }
+        perform(nil, collapse: true) { try await SessionActions.openInGitGui(path: s.workingDirectory, config: cfg) }
     }
 
     func openFinder(_ s: ClaudeSession) {
-        perform(nil) { try await SessionActions.openInFinder(path: s.workingDirectory) }
+        perform(nil, collapse: true) { try await SessionActions.openInFinder(path: s.workingDirectory) }
     }
 
     func openURL(_ url: String) {
         let cfg = config
-        perform(nil) { try await SessionActions.openURL(url, config: cfg) }
+        perform(nil, collapse: true) { try await SessionActions.openURL(url, config: cfg) }
     }
 
     func openPR(_ s: ClaudeSession) {
@@ -403,7 +409,7 @@ final class SessionStore: ObservableObject {
         }
         let cfg = config
         let how = SessionResumer.effectiveStrategy(cfg.resumeStrategy) == .airlock ? "mit airlock geöffnet" : "wird fortgesetzt"
-        perform("\(past.repoName) \(how)") { try await SessionResumer.resume(past, config: cfg) }
+        perform("\(past.repoName) \(how)", collapse: true) { try await SessionResumer.resume(past, config: cfg) }
     }
 
     // MARK: Detail data
