@@ -74,6 +74,11 @@ public enum SessionActions {
     }
 
     public static func kill(_ session: ClaudeSession) async {
+        if let runtime = session.containerRuntime, let name = session.containerName {
+            // Stopping the container ends Claude inside it; the attached client then exits.
+            _ = await Shell.run(runtime, ["stop", "-t", "5", name], timeout: 20)
+            return
+        }
         guard let pid = session.pid else { return }
         await ProcessScanner.terminateClaude(pid)
     }

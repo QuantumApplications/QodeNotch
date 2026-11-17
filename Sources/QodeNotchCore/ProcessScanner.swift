@@ -45,6 +45,84 @@ public enum ProcessScanner {
         tree.values.filter { $0.basename == "claude" }.map(\.pid).sorted()
     }
 
+    /// A host-side `podman`/`docker` client attached to a container running Claude Code
+    /// (airlock, devcontainers, …). Claude itself runs inside the VM, so this process
+    /// stands in for it: it owns the terminal tab and receives keystrokes.
+    public struct ContainerClient: Equatable, Sendable {
+        public var pid: Int32
+        /// Absolute path or name of the runtime CLI (podman/docker).
+        public var runtime: String
+        public var containerName: String?
+
+        public var isAirlock: Bool { containerName?.hasPrefix("airlock-") ?? false }
+    }
+
+    static let containerRuntimes: Set<String> = ["podman", "docker"]
+
+    /// Find container clients running Claude Code.
+    public static func containerClients(in tree: ProcessTree) async -> [Int32: ContainerClient] {
+        let candidates = tree.values.filter { containerRuntimes.contains($0.basename) }.map(\.pid)
+        guard !candidates.isEmpty else { return [:] }
+        let r = await Shell.run("/bin/ps", ["-ww", "-o", "pid=,args=", "-p", candidates.map(String.init).joined(separator: ",")], timeout: 5)
+        var result: [Int32: ContainerClient] = [:]
+        for raw in r.stdout.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard let space = line.firstIndex(of: " "), let pid = Int32(line[..<space]) else { continue }
+            let args = String(line[space...]).trimmingCharacters(in: .whitespaces)
+            if var client = parseContainerInvocation(args) {
+                client.pid = pid
+                result[pid] = client
+            }
+        }
+        return result
+    }
+
+    /// Recognize `podman run … claude`, `podman start --attach airlock-…` and similar.
+    public static func parseContainerInvocation(_ args: String) -> ContainerClient? {
+        let tokens = args.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard let first = tokens.first else { return nil }
+        let runtime = first.split(separator: "/").last.map(String.init) ?? first
+        guard containerRuntimes.contains(runtime) else { return nil }
+
+        // Subcommand: first non-flag token (skipping a leading "container").
+        var i = 1
+        while i < tokens.count, tokens[i].hasPrefix("-") { i += 1 }
+        guard i < tokens.count else { return nil }
+        var sub = tokens[i]
+        if sub == "container", i + 1 < tokens.count { i += 1; sub = tokens[i] }
+        guard ["run", "start", "attach", "exec"].contains(sub) else { return nil }
+        let rest = Array(tokens[(i + 1)...])
+
+        var name: String?
+        if sub == "run" {
+            for (j, t) in rest.enumerated() {
+                if t == "--name", j + 1 < rest.count { name = rest[j + 1]; break }
+                if t.hasPrefix("--name=") { name = String(t.dropFirst(7)); break }
+            }
+        } else {
+            // start/attach/exec: the first positional argument is the container.
+            var skipNext = false
+            for t in rest {
+                if skipNext { skipNext = false; continue }
+                if t.hasPrefix("-") {
+                    // Flags of exec that take a value.
+                    if ["-e", "--env", "-u", "--user", "-w", "--workdir", "--detach-keys"].contains(t) { skipNext = true }
+                    continue
+                }
+                name = t
+                break
+            }
+        }
+        let runsClaude = rest.contains { $0 == "claude" || $0.hasSuffix("/claude") }
+        guard (name?.hasPrefix("airlock-") ?? false) || runsClaude else { return nil }
+        // Detached runs have no terminal to talk to.
+        if sub == "run" && (rest.contains("-d") || rest.contains("--detach")) { return nil }
+        if sub == "start" && !(rest.contains("-a") || rest.contains("--attach") || rest.contains { $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("a") }) {
+            return nil
+        }
+        return ContainerClient(pid: 0, runtime: first, containerName: name)
+    }
+
     /// Working directories for many PIDs via one `lsof` call.
     public static func workingDirectories(for pids: [Int32]) async -> [Int32: String] {
         guard !pids.isEmpty else { return [:] }

@@ -20,6 +20,10 @@ Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-S
 | **Benachrichtigungen** | Mitteilungen und Töne pro Ereignis (wartet / fertig / Fehler), Klick springt ins Terminal. |
 | **Verwaist** | Sessions, deren Terminal geschlossen wurde oder deren tmux-Session getrennt ist, werden markiert; tmux-Sessions lassen sich wieder anhängen. |
 
+### Claude im Container (airlock & Co.)
+
+Läuft Claude Code in einem Container – z. B. mit [airlock](https://github.com/sundance2000/airlock) (Podman) oder per `docker run … claude` –, gibt es auf dem Mac keinen `claude`-Prozess. QodeNotch erkennt dann den `podman`/`docker`-Client, der im Terminal-Tab hängt (`podman run … --name airlock-…` bzw. `podman start --attach airlock-…`), und nutzt ihn für Terminal-Fokus und Freigaben. Weil airlock `~/.claude` in den Container mountet, liegen Hook-Skript und Ereignisse unter `~/.claude/qodenotch/`; im Container geschriebene Ereignisse werden über das Arbeitsverzeichnis der Session zugeordnet. „Session beenden“ stoppt den Container (`podman stop`). Da die CPU-Last im Container nicht sichtbar ist, stützt sich der Status dort ganz auf Hooks und Transcript.
+
 ### Unterstützte Terminals
 
 | Terminal | Tab-Fokus | Text/Tasten senden | Neue Session |
@@ -71,7 +75,7 @@ Optional: `gh` (eingeloggt) für PR-Status, `tmux` für Steuerung ohne Fokuswech
 
 ## Wie es funktioniert
 
-Beim Start installiert QodeNotch ein kleines Shell-Skript als Hook in `~/.claude/settings.json` (bestehende Hooks bleiben erhalten, einmaliges Backup als `settings.json.qodenotch-backup`). Bei jedem Ereignis (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`, …) schreibt es den Hook-Payload nach `~/.qodenotch/events/<claude-pid>.json`. Die App fragt jede Sekunde Prozesse, Hook-Dateien und die Enden der JSONL-Transcripts ab – es gibt keine Datenbank, alles wird jedes Mal neu berechnet. Freigaben werden als Tastendruck (↩ / Esc / „2“) an das jeweilige Terminal bzw. die tmux-Pane geschickt.
+Beim Start installiert QodeNotch ein kleines Shell-Skript (`~/.claude/qodenotch/status-hook.sh`) als Hook in `~/.claude/settings.json` (bestehende Hooks bleiben erhalten, einmaliges Backup als `settings.json.qodenotch-backup`). Bei jedem Ereignis (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`, …) schreibt es den Hook-Payload nach `~/.claude/qodenotch/events/<claude-pid>.json` (in Containern `c-<session-id>.json`). Die App fragt jede Sekunde Prozesse, Hook-Dateien und die Enden der JSONL-Transcripts ab – es gibt keine Datenbank, alles wird jedes Mal neu berechnet. Freigaben werden als Tastendruck (↩ / Esc / „2“) an das jeweilige Terminal bzw. die tmux-Pane geschickt.
 
 Konfiguration: `~/.qodenotch/config.json` (oder über die Einstellungen). Hooks lassen sich unter *Einstellungen → Hooks* wieder entfernen.
 

@@ -173,9 +173,12 @@ struct SessionDetailView: View {
             if let p = s.parentRepo { info("Haupt-Repo", Paths.abbreviateHome(p)) }
             if let b = s.branch { info("Branch", b) }
             info("Session-ID", s.id)
-            if let pid = s.pid { info("PID", "\(pid) · CPU \(String(format: "%.0f", s.cpuPercent)) %") }
+            if let pid = s.pid {
+                info("PID", s.isContainerized ? "\(pid) (\(Paths.repoName(from: s.containerRuntime ?? "podman"))-Client)" : "\(pid) · CPU \(String(format: "%.0f", s.cpuPercent)) %")
+            }
             if let t = s.terminalName { info("Terminal", t) }
             if let t = s.tmuxSession { info("tmux", t) }
+            if let c = s.containerName { info("Container", c) }
             if let start = s.startedAt { info("Gestartet", start.formatted(date: .abbreviated, time: .shortened)) }
             info("Letzte Aktivität", s.lastActivity.formatted(date: .omitted, time: .standard))
             info("Nachrichten", "\(s.preview.messageCount)")

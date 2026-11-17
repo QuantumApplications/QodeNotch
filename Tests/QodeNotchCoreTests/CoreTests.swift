@@ -88,6 +88,7 @@ final class HookTests: XCTestCase {
         let settings = HookManager.readSettings()!
         let stop = (settings["hooks"] as! [String: Any])["Stop"] as! [[String: Any]]
         XCTAssertEqual(stop.count, 2)
+        XCTAssertEqual(HookManager.state(), .installed)
         XCTAssertEqual(settings["model"] as? String, "opus")
 
         try HookManager.uninstall()
@@ -98,22 +99,115 @@ final class HookTests: XCTestCase {
         XCTAssertEqual(HookManager.state(), .notInstalled)
     }
 
-    func testHookScriptWritesEventFile() throws {
+    private func withTempHome(_ body: (String) throws -> Void) throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
         try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
         setenv("HOME", home, 1)
         defer { unsetenv("HOME") }
-        XCTAssertEqual(HookManager.install(), .installed)
+        try body(home)
+    }
 
-        let payload = #"{"hook_event_name":"UserPromptSubmit","session_id":"abc","cwd":"/tmp","transcript_path":"/tmp/a.jsonl","prompt":"say \"hi\""}"#
-        let r = Shell.runSync("/bin/sh", [Paths.hookScript], input: payload)
-        XCTAssertEqual(r.exitCode, 0, r.stderr)
-        let events = HookManager.readAll()
-        XCTAssertEqual(events.count, 1)
-        let ev = try XCTUnwrap(events.values.first)
-        XCTAssertEqual(ev.sessionId, "abc")
-        XCTAssertEqual(ev.event, "UserPromptSubmit")
-        XCTAssertEqual(ev.transcriptPath, "/tmp/a.jsonl")
+    private func runHook(_ payload: String, inContainer: Bool, home: String) -> ShellResult {
+        var env = ProcessInfo.processInfo.environment
+        env["HOME"] = home
+        env["QODENOTCH_IN_CONTAINER"] = inContainer ? "1" : "0"
+        // Exactly the command Claude Code runs from settings.json.
+        return Shell.runSync("/bin/sh", ["-c", HookManager.command], environment: env, input: payload)
+    }
+
+    func testHookScriptWritesHostEventFile() throws {
+        try withTempHome { home in
+            XCTAssertEqual(HookManager.install(), .installed)
+            let payload = #"{"hook_event_name":"UserPromptSubmit","session_id":"abc","cwd":"/tmp","transcript_path":"/tmp/a.jsonl","prompt":"say \"hi\""}"#
+            let r = runHook(payload, inContainer: false, home: home)
+            XCTAssertEqual(r.exitCode, 0, r.stderr)
+            let snap = HookManager.readAll()
+            XCTAssertEqual(snap.byPid.count, 1)
+            XCTAssertTrue(snap.containerEvents.isEmpty)
+            let ev = try XCTUnwrap(snap.byPid.values.first)
+            XCTAssertEqual(ev.sessionId, "abc")
+            XCTAssertEqual(ev.event, "UserPromptSubmit")
+            XCTAssertEqual(ev.transcriptPath, "/tmp/a.jsonl")
+        }
+    }
+
+    func testHookScriptWritesContainerEventFile() throws {
+        try withTempHome { home in
+            XCTAssertEqual(HookManager.install(), .installed)
+            let payload = #"{"hook_event_name":"Notification","session_id":"s-123","cwd":"/Users/me/code/app","transcript_path":"/home/claude/.claude/projects/-Users-me-code-app/s-123.jsonl","notification_type":"permission_prompt"}"#
+            let r = runHook(payload, inContainer: true, home: home)
+            XCTAssertEqual(r.exitCode, 0, r.stderr)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: Paths.eventsDir + "/c-s-123.json"))
+            let snap = HookManager.readAll()
+            XCTAssertTrue(snap.byPid.isEmpty)
+            let ev = try XCTUnwrap(snap.containerEvent(cwd: "/Users/me/code/app"))
+            XCTAssertNil(ev.pid)
+            XCTAssertNotNil(ev.container)
+            XCTAssertEqual(ev.impliedStatus, .waiting)
+            XCTAssertNil(snap.containerEvent(cwd: "/elsewhere"))
+
+            // Container transcript paths map onto the host's ~/.claude.
+            let hostFile = Paths.claudeProjectsDir + "/-Users-me-code-app/s-123.jsonl"
+            try FileManager.default.createDirectory(atPath: Paths.claudeProjectsDir + "/-Users-me-code-app", withIntermediateDirectories: true)
+            _ = FileManager.default.createFile(atPath: hostFile, contents: Data())
+            XCTAssertEqual(HookManager.hostTranscriptPath(ev.transcriptPath!), hostFile)
+        }
+    }
+
+    func testHookCommandIsHarmlessWithoutScript() throws {
+        try withTempHome { home in
+            let r = runHook(#"{"hook_event_name":"Stop","session_id":"x"}"#, inContainer: true, home: home)
+            XCTAssertEqual(r.exitCode, 0)
+        }
+    }
+
+    func testInstallMigratesLegacyAbsolutePath() throws {
+        try withTempHome { home in
+            try FileManager.default.createDirectory(atPath: home + "/.claude", withIntermediateDirectories: true)
+            let legacy = home + "/.qodenotch/hooks/status-hook.sh"
+            let settings = #"{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\#(legacy)","timeout":5}]},{"hooks":[{"type":"command","command":"/usr/bin/true"}]}]}}"#
+            try settings.write(toFile: Paths.claudeSettingsFile, atomically: true, encoding: .utf8)
+            XCTAssertEqual(HookManager.install(), .installed)
+            let stop = (HookManager.readSettings()!["hooks"] as! [String: Any])["Stop"] as! [[String: Any]]
+            let commands = stop.flatMap { ($0["hooks"] as! [[String: Any]]).map { $0["command"] as! String } }
+            XCTAssertEqual(commands.sorted(), [HookManager.command, "/usr/bin/true"].sorted())
+        }
+    }
+}
+
+final class ContainerTests: XCTestCase {
+    func testAirlockRunInvocation() {
+        let args = "/opt/homebrew/bin/podman run -it --name airlock-app-0123456789ab --userns keep-id:uid=1000,gid=1000 --cap-add NET_ADMIN,SETPCAP -v /Users/me/code/app:/Users/me/code/app -w /Users/me/code/app localhost/airlock:latest claude --model opus"
+        let c = ProcessScanner.parseContainerInvocation(args)
+        XCTAssertEqual(c?.containerName, "airlock-app-0123456789ab")
+        XCTAssertEqual(c?.isAirlock, true)
+        XCTAssertEqual(c?.runtime, "/opt/homebrew/bin/podman")
+    }
+
+    func testAirlockStartInvocation() {
+        let c = ProcessScanner.parseContainerInvocation("podman start --attach --interactive airlock-app-0123456789ab")
+        XCTAssertEqual(c?.containerName, "airlock-app-0123456789ab")
+    }
+
+    func testGenericDockerClaude() {
+        XCTAssertNotNil(ProcessScanner.parseContainerInvocation("docker run --rm -it -v /x:/x my/image claude"))
+        XCTAssertNotNil(ProcessScanner.parseContainerInvocation("docker exec -it -w /work devbox claude"))
+    }
+
+    func testIgnoresUnrelatedRuntimeCalls() {
+        XCTAssertNil(ProcessScanner.parseContainerInvocation("podman machine start"))
+        XCTAssertNil(ProcessScanner.parseContainerInvocation("podman build -t localhost/airlock:latest ."))
+        XCTAssertNil(ProcessScanner.parseContainerInvocation("podman ps -q --filter name=^airlock-x$"))
+        XCTAssertNil(ProcessScanner.parseContainerInvocation("docker run -d --name web nginx"))
+        XCTAssertNil(ProcessScanner.parseContainerInvocation("podman run -it --name airlock-x -d img claude"))
+        XCTAssertNil(ProcessScanner.parseContainerInvocation("/usr/bin/claude"))
+    }
+
+    func testStatusFromContainerEventWithoutCpu() {
+        // Container sessions report no CPU; hooks alone must drive the status.
+        let now = Date()
+        XCTAssertEqual(StatusClassifier.classify(.init(cpuPercent: 0, hookStatus: .waiting, hookTimestamp: now), now: now), .waiting)
+        XCTAssertEqual(StatusClassifier.classify(.init(transcriptMtime: now, cpuPercent: 10, hookStatus: .working, hookTimestamp: now), now: now), .working)
     }
 }
 

@@ -84,6 +84,7 @@ struct SessionCardView: View {
                 Chip(text: branch, symbol: "arrow.triangle.branch")
             }
             if s.isWorktree { Chip(text: "Worktree", symbol: "square.stack.3d.up", color: .teal) }
+            if s.isContainerized { Chip(text: s.isAirlock ? "airlock" : "Container", symbol: "shippingbox", color: .cyan) }
             if let git = s.git { GitStatsView(git: git) }
             if let url = s.prUrl { PrBadge(url: url, status: store.prStatuses[url]) }
             Spacer(minLength: 0)

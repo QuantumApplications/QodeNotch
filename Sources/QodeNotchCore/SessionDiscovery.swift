@@ -28,7 +28,8 @@ public actor SessionDiscovery {
         let hooks = HookManager.readAll()
         let meta = SessionMetaStore.load()
         let tree = await treeT
-        let pids = ProcessScanner.claudePids(in: tree)
+        let containers = await ProcessScanner.containerClients(in: tree)
+        let pids = ProcessScanner.claudePids(in: tree) + containers.keys.sorted()
         let cwds = await ProcessScanner.workingDirectories(for: pids)
         let alive = Set(pids)
 
@@ -36,21 +37,33 @@ public actor SessionDiscovery {
             await refreshTerminalInfo(pids: pids, tree: tree)
         }
 
+        // Resolve the hook event for every process: by PID for native Claude,
+        // by working directory for Claude inside a container.
+        var hookFor: [Int32: HookEvent] = [:]
+        for pid in pids {
+            if containers[pid] != nil {
+                if let cwd = cwds[pid], let ev = hooks.containerEvent(cwd: cwd) { hookFor[pid] = ev }
+            } else if let ev = hooks.byPid[pid] {
+                hookFor[pid] = ev
+            }
+        }
+
         // Transcripts already claimed by hook events must not be reused by the mtime fallback.
         var claimed = Set<String>()
-        for (pid, ev) in hooks where alive.contains(pid) {
-            if let t = ev.transcriptPath { claimed.insert(t) }
+        for ev in hookFor.values {
+            if let t = ev.transcriptPath { claimed.insert(HookManager.hostTranscriptPath(t)) }
         }
 
         var sessions: [ClaudeSession] = []
         await withTaskGroup(of: ClaudeSession?.self) { group in
             for pid in pids {
-                guard let cwd = cwds[pid] ?? hooks[pid]?.cwd else { continue }
+                guard let cwd = cwds[pid] ?? hookFor[pid]?.cwd else { continue }
                 let entry = tree[pid]
-                let hook = hooks[pid]
+                let hook = hookFor[pid]
+                let container = containers[pid]
                 let claimedCopy = claimed
                 group.addTask {
-                    await self.build(pid: pid, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, claimed: claimedCopy)
+                    await self.build(pid: pid, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, container: container, claimed: claimedCopy)
                 }
             }
             for await s in group { if let s { sessions.append(s) } }
@@ -135,8 +148,10 @@ public actor SessionDiscovery {
         return c
     }
 
-    private func build(pid: Int32, cwd: String, cpu: Double, hook: HookEvent?, claimed: Set<String>) async -> ClaudeSession? {
-        let transcript = hook?.transcriptPath ?? TranscriptReader.latestTranscript(in: Paths.projectDir(for: cwd), excluding: claimed)
+    private func build(pid: Int32, cwd: String, cpu: Double, hook: HookEvent?, container: ProcessScanner.ContainerClient?,
+                       claimed: Set<String>) async -> ClaudeSession? {
+        let transcript = hook?.transcriptPath.map(HookManager.hostTranscriptPath)
+            ?? TranscriptReader.latestTranscript(in: Paths.projectDir(for: cwd), excluding: claimed)
 
         var tail: [TranscriptLine] = []
         var head: [TranscriptLine] = []
@@ -152,8 +167,16 @@ public actor SessionDiscovery {
         let asking = TranscriptReader.isAskingForInput(tail)
         let hasError = TranscriptReader.lastMessageHasError(tail)
 
+        // For containers the host process is only the podman/docker client; Claude's
+        // CPU usage is invisible, so approximate activity from transcript writes.
+        var effectiveCpu = cpu
+        if container != nil {
+            let age = mtime.map { Date().timeIntervalSince($0) } ?? .infinity
+            effectiveCpu = age < 5 ? 10 : 0
+        }
+
         let status = StatusClassifier.classify(.init(
-            pidAlive: true, transcriptMtime: mtime, cpuPercent: cpu, hasError: hasError, isAskingForInput: asking,
+            pidAlive: true, transcriptMtime: mtime, cpuPercent: effectiveCpu, hasError: hasError, isAskingForInput: asking,
             hasPendingToolUse: pending, hookStatus: hook?.impliedStatus, hookTimestamp: hook?.timestamp))
 
         let lastActivity = [mtime, hook?.timestamp].compactMap { $0 }.max() ?? Date()
@@ -180,7 +203,9 @@ public actor SessionDiscovery {
             orphaned: recentActivity ? false : orphaned.contains(pid),
             tmuxSession: tmuxSessionByPid[pid],
             cpuPercent: cpu,
-            terminalName: terminalNameByPid[pid].flatMap { $0.isEmpty ? nil : $0 }
+            terminalName: terminalNameByPid[pid].flatMap { $0.isEmpty ? nil : $0 },
+            containerName: container?.containerName,
+            containerRuntime: container?.runtime
         )
     }
 

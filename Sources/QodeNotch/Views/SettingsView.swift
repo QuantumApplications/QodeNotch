@@ -258,7 +258,7 @@ private struct HookSettings: View {
                     Image(systemName: icon.0).foregroundStyle(icon.1)
                     Text(stateText)
                 }
-                Text("QodeNotch trägt ein kleines Shell-Skript als Hook in ~/.claude/settings.json ein. Es schreibt bei jedem Ereignis (Prompt, Tool, Freigabe, Stop …) eine Datei nach ~/.qodenotch/events/<pid>.json. Bestehende Hooks bleiben erhalten; vor der ersten Änderung wird ein Backup angelegt.")
+                Text("QodeNotch trägt ein kleines Shell-Skript als Hook in ~/.claude/settings.json ein. Es liegt in ~/.claude/qodenotch und schreibt bei jedem Ereignis (Prompt, Tool, Freigabe, Stop …) eine Datei nach ~/.claude/qodenotch/events – das funktioniert auch, wenn Claude in einem Container wie airlock läuft. Bestehende Hooks bleiben erhalten; vor der ersten Änderung wird ein Backup angelegt.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Neu installieren") { store.reinstallHooks() }

@@ -13,9 +13,14 @@ public enum Paths {
 
     /// QodeNotch's own state directory.
     public static var appDir: String { home + "/.qodenotch" }
-    public static var hooksDir: String { appDir + "/hooks" }
-    public static var eventsDir: String { appDir + "/events" }
+    /// Hook script + events live inside `~/.claude`, because that directory is
+    /// also mounted into containerized Claude Code setups (e.g. airlock).
+    public static var hooksDir: String { claudeDir + "/qodenotch" }
+    public static var eventsDir: String { hooksDir + "/events" }
     public static var hookScript: String { hooksDir + "/status-hook.sh" }
+    /// Locations used by earlier versions (cleaned up on install).
+    static var legacyHooksDir: String { appDir + "/hooks" }
+    static var legacyEventsDir: String { appDir + "/events" }
     public static var configFile: String { appDir + "/config.json" }
     public static var sessionMetaFile: String { appDir + "/session-meta.json" }
 

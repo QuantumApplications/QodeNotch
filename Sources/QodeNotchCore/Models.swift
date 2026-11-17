@@ -139,6 +139,12 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
     public var tmuxSession: String?
     public var cpuPercent: Double
     public var terminalName: String?
+    /// Set when Claude runs in a container (e.g. airlock); `pid` is then the host-side runtime client.
+    public var containerName: String?
+    public var containerRuntime: String?
+
+    public var isContainerized: Bool { containerRuntime != nil }
+    public var isAirlock: Bool { containerName?.hasPrefix("airlock-") ?? false }
 
     public init(
         id: String, pid: Int32?, workingDirectory: String, repoName: String, parentRepo: String? = nil,
@@ -146,7 +152,7 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
         startedAt: Date? = nil, git: GitSummary? = nil, preview: ConversationPreview = .empty,
         taskSummary: TaskSummary? = nil, hasPendingToolUse: Bool = false, jsonlPath: String? = nil,
         prUrl: String? = nil, orphaned: Bool = false, tmuxSession: String? = nil, cpuPercent: Double = 0,
-        terminalName: String? = nil
+        terminalName: String? = nil, containerName: String? = nil, containerRuntime: String? = nil
     ) {
         self.id = id
         self.pid = pid
@@ -168,6 +174,8 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
         self.tmuxSession = tmuxSession
         self.cpuPercent = cpuPercent
         self.terminalName = terminalName
+        self.containerName = containerName
+        self.containerRuntime = containerRuntime
     }
 
     /// Title shown in the UI: task title, else repo name.
