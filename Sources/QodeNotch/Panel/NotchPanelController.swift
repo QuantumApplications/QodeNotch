@@ -127,8 +127,8 @@ final class NotchPanelController: NSObject {
         self.screen = screen
         layout.geometry = ScreenGeometry.geometry(for: screen)
         let pad = NotchLayout.shadowPadding
-        let width = max(CGFloat(store.config.expandedWidth), layout.geometry.notchWidth + NotchLayout.wingWidth * 2) + pad * 2
-        let height = CGFloat(store.config.maxExpandedHeight) + layout.geometry.notchHeight + pad
+        let width = max(store.config.scaledExpandedWidth, layout.geometry.notchWidth + NotchLayout.wingWidth * 2) + pad * 2
+        let height = store.config.scaledMaxHeight + layout.geometry.notchHeight + pad
         let frame = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
         panel.setFrame(frame, display: true)
         if !hiddenForFullscreen { panel.orderFrontRegardless() }
@@ -149,8 +149,8 @@ final class NotchPanelController: NSObject {
     private func activeRect() -> CGRect {
         let g = layout.geometry
         if store.isExpanded {
-            let w = CGFloat(store.config.expandedWidth)
-            let h = min(layout.expandedContentHeight, CGFloat(store.config.maxExpandedHeight))
+            let w = store.config.scaledExpandedWidth
+            let h = min(layout.expandedContentHeight, store.config.scaledMaxHeight)
             return CGRect(x: g.screenFrame.midX - w / 2, y: g.screenFrame.maxY - h, width: w, height: h).insetBy(dx: -6, dy: -6)
         }
         let size = layout.collapsedSize(hasSessions: !store.liveSessions.isEmpty)
@@ -234,6 +234,8 @@ final class NotchPanelController: NSObject {
         }
         panel.ignoresMouseEvents = false
         if store.selectedId == nil { store.selectedId = store.sessions.first?.id }
+        store.refreshLimits()
+        store.refreshUsage()
         withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { store.isExpanded = true }
         if makeKey {
             NSApp.activate(ignoringOtherApps: true)
@@ -307,6 +309,7 @@ final class NotchPanelController: NSObject {
             return true
         }
         if c == "h" { store.route = .history; return true }
+        if c == "u" { store.route = .usage; return true }
         guard let s = selected else {
             if c == "n" { store.route = .newSession; return true }
             return false

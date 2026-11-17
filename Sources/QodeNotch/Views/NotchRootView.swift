@@ -37,15 +37,18 @@ struct NotchRootView: View {
             if expanded {
                 ExpandedView(controller: controller)
                     .environment(\.colorScheme, expandedScheme)
+                    .environment(\.notchScale, store.config.scale)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             } else {
                 CollapsedView()
                     .environment(\.colorScheme, .dark)
+                    // The collapsed bar is as tall as the notch: grow its text only a little.
+                    .environment(\.notchScale, min(store.config.scale, 1.15))
                     .frame(width: collapsed.width + hoverGrow, height: collapsed.height)
                     .transition(.opacity)
             }
         }
-        .frame(width: expanded ? CGFloat(store.config.expandedWidth) : collapsed.width + hoverGrow)
+        .frame(width: expanded ? store.config.scaledExpandedWidth : collapsed.width + hoverGrow)
         .background(
             NotchShape(topRadius: expanded ? 10 : 6, bottomRadius: expanded ? 22 : 10)
                 .fill(light ? Color(white: 0.965) : Color.black)
@@ -80,7 +83,7 @@ struct CollapsedView: View {
                     StatusOrb(status: store.aggregateStatus, size: 9)
                     if let s = live.first(where: { $0.status == .waiting }) ?? live.first {
                         Text(s.repoName)
-                            .font(.system(size: 10, weight: .semibold))
+                            .scaledFont(size: 10, weight: .semibold)
                             .foregroundStyle(Color.primary.opacity(0.75))
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -94,13 +97,13 @@ struct CollapsedView: View {
 
             HStack(spacing: 5) {
                 if store.waitingCount > 0 {
-                    Image(systemName: "hand.raised.fill").font(.system(size: 9))
-                    Text("\(store.waitingCount)").font(.system(size: 11, weight: .bold, design: .rounded))
+                    Image(systemName: "hand.raised.fill").scaledFont(size: 9)
+                    Text("\(store.waitingCount)").scaledFont(size: 11, weight: .bold, design: .rounded)
                 } else if store.workingCount > 0 {
                     ProgressView().controlSize(.mini).tint(SessionStatus.working.color).scaleEffect(0.7)
-                    Text("\(store.workingCount)").font(.system(size: 11, weight: .bold, design: .rounded))
+                    Text("\(store.workingCount)").scaledFont(size: 11, weight: .bold, design: .rounded)
                 } else if !live.isEmpty {
-                    Text("\(live.count)").font(.system(size: 11, weight: .bold, design: .rounded))
+                    Text("\(live.count)").scaledFont(size: 11, weight: .bold, design: .rounded)
                 }
             }
             .foregroundStyle(store.waitingCount > 0 ? SessionStatus.waiting.color : Color.primary.opacity(0.8))
@@ -137,6 +140,8 @@ struct ExpandedView: View {
                     NewSessionView()
                 case .history:
                     HistoryView()
+                case .usage:
+                    UsageView()
                 }
             }
             .padding(.horizontal, 12)
@@ -144,7 +149,7 @@ struct ExpandedView: View {
 
             if let toast = store.toast {
                 Text(toast.text)
-                    .font(.system(size: 11, weight: .medium))
+                    .scaledFont(size: 11, weight: .medium)
                     .foregroundStyle(toast.isError ? Color.red : Color.primary.opacity(0.85))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
@@ -162,12 +167,14 @@ struct ExpandedView: View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
                 StatusOrb(status: store.aggregateStatus, size: 8)
-                Text("QodeNotch").font(.system(size: 12, weight: .bold))
-                Text(summary).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1)
+                Text("QodeNotch").scaledFont(size: 12, weight: .bold)
+                Text(summary).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1)
             }
             .padding(.leading, 8)
             Spacer(minLength: layout.geometry.hasNotch ? layout.geometry.notchWidth : 12)
             HStack(spacing: 4) {
+                LimitBadge()
+                IconButton(symbol: "chart.bar", help: "Limits & Nutzung", shortcut: "U") { store.route = .usage }
                 IconButton(symbol: "plus", help: "Neue Session", shortcut: "N") { store.route = .newSession }
                 IconButton(symbol: "clock.arrow.circlepath", help: "Alle Sessions", shortcut: "H") { store.route = .history }
                 IconButton(symbol: "arrow.clockwise", help: "Aktualisieren", shortcut: "R") { store.refreshNow() }

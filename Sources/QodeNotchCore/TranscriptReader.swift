@@ -1,5 +1,39 @@
 import Foundation
 
+/// Token usage of one API response.
+public struct TokenUsage: Equatable, Sendable {
+    public var input = 0
+    public var output = 0
+    public var cacheCreation = 0
+    public var cacheRead = 0
+
+    public init(input: Int = 0, output: Int = 0, cacheCreation: Int = 0, cacheRead: Int = 0) {
+        self.input = input
+        self.output = output
+        self.cacheCreation = cacheCreation
+        self.cacheRead = cacheRead
+    }
+
+    init?(_ json: [String: Any]?) {
+        guard let json else { return nil }
+        func n(_ k: String) -> Int { (json[k] as? NSNumber)?.intValue ?? 0 }
+        input = n("input_tokens")
+        output = n("output_tokens")
+        cacheCreation = n("cache_creation_input_tokens")
+        cacheRead = n("cache_read_input_tokens")
+    }
+
+    /// All tokens processed (input incl. cache + output).
+    public var total: Int { input + output + cacheCreation + cacheRead }
+
+    public static func + (a: TokenUsage, b: TokenUsage) -> TokenUsage {
+        TokenUsage(input: a.input + b.input, output: a.output + b.output,
+                   cacheCreation: a.cacheCreation + b.cacheCreation, cacheRead: a.cacheRead + b.cacheRead)
+    }
+
+    public static func += (a: inout TokenUsage, b: TokenUsage) { a = a + b }
+}
+
 /// One parsed line of a Claude Code JSONL transcript.
 public struct TranscriptLine {
     public var type: String
@@ -7,10 +41,16 @@ public struct TranscriptLine {
     public var cwd: String?
     /// Text of a `{"type":"summary"}` line (session title written by Claude Code).
     public var summary: String?
+    /// Name given with `/rename` (stored as a `customTitle` line).
+    public var customTitle: String?
     public var gitBranch: String?
     public var timestamp: String?
     public var role: String?
     public var stopReason: String?
+    public var model: String?
+    /// API message id; one response is split over several lines that repeat its usage.
+    public var messageId: String?
+    public var usage: TokenUsage?
     /// `message.content` as either a String or an array of blocks.
     public var content: Any?
     public var isMeta: Bool
@@ -20,18 +60,48 @@ public struct TranscriptLine {
         sessionId = json["sessionId"] as? String
         cwd = json["cwd"] as? String
         summary = json["summary"] as? String
+        customTitle = (json["customTitle"] as? String) ?? (json["custom_title"] as? String)
         gitBranch = json["gitBranch"] as? String
         timestamp = json["timestamp"] as? String
         isMeta = json["isMeta"] as? Bool ?? false
         let message = json["message"] as? [String: Any]
         role = message?["role"] as? String
         stopReason = message?["stop_reason"] as? String
+        model = message?["model"] as? String
+        messageId = message?["id"] as? String
+        usage = TokenUsage(message?["usage"] as? [String: Any])
         content = message?["content"]
     }
 
     var hasMessage: Bool { content != nil }
     var blocks: [[String: Any]]? { content as? [[String: Any]] }
-    var isNoise: Bool { type == "progress" || type == "file-history-snapshot" || type == "system" || type == "summary" }
+    var isNoise: Bool {
+        type == "progress" || type == "file-history-snapshot" || type == "system" || type == "summary" || type == "custom-title"
+    }
+}
+
+/// Human-friendly model names: "claude-opus-4-5-20251101" → "Opus 4.5".
+public enum ModelName {
+    public static func pretty(_ id: String) -> String {
+        let lower = id.lowercased()
+        guard lower != "<synthetic>" else { return id }
+        let families = ["opus", "sonnet", "haiku", "fable"]
+        guard let family = families.first(where: lower.contains) else { return id }
+        // Version digits after (new ids) or before (old ids) the family name.
+        let parts = lower.replacingOccurrences(of: "[1m]", with: "").split(whereSeparator: { $0 == "-" || $0 == "." || $0 == "@" }).map(String.init)
+        guard let idx = parts.firstIndex(of: family) else { return family.capitalized }
+        var version: [String] = []
+        for p in parts[(idx + 1)...] {
+            if p.count <= 2, Int(p) != nil { version.append(p) } else { break }
+        }
+        if version.isEmpty {
+            for p in parts[..<idx].reversed() {
+                if p.count <= 2, Int(p) != nil { version.insert(p, at: 0) } else if !version.isEmpty { break }
+            }
+        }
+        let name = family.capitalized + (version.isEmpty ? "" : " " + version.joined(separator: "."))
+        return lower.contains("[1m]") ? name + " (1M)" : name
+    }
 }
 
 public enum TranscriptReader {
@@ -104,6 +174,31 @@ public enum TranscriptReader {
 
     public static func startedAt(_ lines: [TranscriptLine]) -> Date? {
         lines.lazy.compactMap { $0.timestamp }.first.flatMap(parseDate)
+    }
+
+    /// Name of the session: `/rename` title, else Claude Code's summary.
+    public static func sessionName(_ lines: [TranscriptLine]) -> String? {
+        if let t = lines.last(where: { !($0.customTitle ?? "").isEmpty })?.customTitle { return t }
+        return lines.last(where: { $0.type == "summary" && !($0.summary ?? "").isEmpty })?.summary
+    }
+
+    /// Model of the latest real assistant response.
+    public static func model(_ lines: [TranscriptLine]) -> String? {
+        lines.last { $0.type == "assistant" && $0.model != nil && $0.model != "<synthetic>" }?.model
+    }
+
+    /// Token totals, counting each API response once.
+    public static func usageTotals(_ lines: [TranscriptLine]) -> (total: TokenUsage, byModel: [String: TokenUsage]) {
+        var seen = Set<String>()
+        var total = TokenUsage()
+        var byModel: [String: TokenUsage] = [:]
+        for l in lines where l.type == "assistant" {
+            guard let u = l.usage, let model = l.model, model != "<synthetic>" else { continue }
+            if let id = l.messageId, !seen.insert(id).inserted { continue }
+            total += u
+            byModel[model, default: TokenUsage()] += u
+        }
+        return (total, byModel)
     }
 
     public static func branch(_ lines: [TranscriptLine]) -> String? {
@@ -236,8 +331,8 @@ public enum TranscriptReader {
             if line.type == "assistant", let blocks = line.blocks {
                 for b in blocks where (b["type"] as? String) == "text" {
                     let lower = (b["text"] as? String ?? "").lowercased()
-                    if lower.hasPrefix("api error") { return true }
-                    if lower.contains("error") && lower.contains("failed") && lower.count < 400 { return true }
+                    // Only Claude Code's own API failure messages – not answers that merely talk about errors.
+                    if lower.hasPrefix("api error") || lower.hasPrefix("request timed out") || lower.hasPrefix("credit balance is too low") { return true }
                 }
             }
             return false

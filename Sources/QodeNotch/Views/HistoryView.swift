@@ -13,11 +13,20 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 IconButton(symbol: "chevron.left", help: "Zurück", shortcut: "←") { store.route = .list }
-                Text("Alle Sessions").font(.system(size: 13, weight: .bold))
-                Text("\(store.history.count)").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.45))
+                Text("Alle Sessions").scaledFont(size: 13, weight: .bold)
+                Text("\(store.history.count)").scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.45))
                 Spacer()
-                Text(strategyText).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.45))
+                Text(strategyText).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.45))
                 IconButton(symbol: "arrow.clockwise", help: "Neu laden") { store.loadHistory() }
+            }
+            HStack(spacing: 6) {
+                PillButton(title: "Web-Sessions (claude.ai)", symbol: "globe", color: SessionStatus.working.color, filled: false) {
+                    store.openURL(SessionActions.claudeWebCodeURL)
+                }
+                PillButton(title: "Claude Desktop", symbol: "macwindow", color: .purple, filled: false) {
+                    Task { try? await SessionActions.openInClaudeDesktop(hostSessionId: nil) }
+                }
+                Spacer()
             }
             NotchTextField(placeholder: "Suchen nach Titel, Pfad, Branch …", text: $query) {
                 if let first = filtered.first { store.resume(first) }
@@ -27,7 +36,7 @@ struct HistoryView: View {
                 HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }.padding(.vertical, 20)
             } else if filtered.isEmpty {
                 Text(store.history.isEmpty ? "Keine gespeicherten Sessions in ~/.claude/projects gefunden." : "Keine Treffer.")
-                    .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.5))
+                    .scaledFont(size: 11).foregroundStyle(Color.primary.opacity(0.5))
                     .frame(maxWidth: .infinity).padding(.vertical, 16)
             } else {
                 FittingScrollView(maxHeight: maxListHeight) {
@@ -44,7 +53,7 @@ struct HistoryView: View {
     }
 
     private var maxListHeight: CGFloat {
-        CGFloat(store.config.maxExpandedHeight) - max(layout.geometry.notchHeight, 28) - 100
+        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 100 * store.config.scale
     }
 
     private var strategyText: String {
@@ -65,21 +74,21 @@ private struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if let live { StatusOrb(status: live.status, size: 7) }
-                    Text(past.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+                    Text(past.title).scaledFont(size: 11.5, weight: .semibold).lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(past.lastActivity.relative).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
+                    Text(past.lastActivity.relative).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4))
                 }
                 HStack(spacing: 5) {
-                    Text(past.repoName).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.primary.opacity(0.6))
+                    Text(past.repoName).scaledFont(size: 10, weight: .medium).foregroundStyle(Color.primary.opacity(0.6))
                     if let b = past.branch, !b.isEmpty, b != "HEAD" { Chip(text: b, symbol: "arrow.triangle.branch") }
                     if let dir = past.workingDirectory {
-                        Text(Paths.abbreviateHome(dir)).font(.system(size: 9.5)).foregroundStyle(Color.primary.opacity(0.35))
+                        Text(Paths.abbreviateHome(dir)).scaledFont(size: 9.5).foregroundStyle(Color.primary.opacity(0.35))
                             .lineLimit(1).truncationMode(.middle)
                     }
                     if !exists { Chip(text: "Ordner fehlt", symbol: "exclamationmark.triangle", color: .orange) }
                 }
                 if let summary = past.summary, hovering {
-                    Text(summary).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(2)
+                    Text(summary).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(2)
                 }
             }
             if hovering || live != nil {

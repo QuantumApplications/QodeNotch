@@ -46,6 +46,11 @@ private struct GeneralSettings: View {
             }
             Section("Größe & Inhalt") {
                 HStack {
+                    Text("Schrift & Elemente")
+                    Slider(value: $store.config.uiScale, in: 0.8...1.6, step: 0.05)
+                    Text("\(Int((store.config.uiScale * 100).rounded())) %").monospacedDigit().frame(width: 60)
+                }
+                HStack {
                     Text("Breite")
                     Slider(value: $store.config.expandedWidth, in: 420...900, step: 10)
                     Text("\(Int(store.config.expandedWidth)) pt").monospacedDigit().frame(width: 60)
@@ -56,6 +61,9 @@ private struct GeneralSettings: View {
                     Text("\(Int(store.config.maxExpandedHeight)) pt").monospacedDigit().frame(width: 60)
                 }
                 Toggle("Sessions nach Repository gruppieren", isOn: $store.config.groupByRepo)
+                Toggle("Abo-Limits abfragen (5 h / Woche)", isOn: $store.config.showLimits)
+                Text("Nutzt den Login von Claude Code (Keychain bzw. ~/.claude/.credentials.json) und fragt dieselben Werte wie /usage bei Anthropic ab. Beim ersten Mal fragt macOS nach Zugriff auf den Schlüsselbund.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Beendete Sessions weiter anzeigen", isOn: $store.config.showFinishedSessions)
             }
         }
@@ -246,6 +254,7 @@ private struct ShortcutSettings: View {
                 shortcut("D, →", "Details")
                 shortcut("N", "Neue Session")
                 shortcut("H", "Alle Sessions (Verlauf)")
+                shortcut("U", "Limits & Nutzung")
                 shortcut("R", "Aktualisieren")
                 shortcut("esc, ←", "Zurück / schließen")
             }

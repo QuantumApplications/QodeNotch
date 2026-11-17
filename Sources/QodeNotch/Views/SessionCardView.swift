@@ -18,12 +18,14 @@ struct SessionCardView: View {
             titleRow
             metaRow
             previewBlock
-            if s.status == .waiting {
+            if s.awaitingPermission && s.canSendInput {
                 approvalRow
+            } else if s.status == .waiting && s.isDesktop {
+                PillButton(title: "In Claude Desktop beantworten", symbol: "arrow.up.forward.app", color: SessionStatus.waiting.color) { store.focus(s) }
             }
             if isSelected {
                 actionRow
-                if s.pid != nil && s.status != .working {
+                if s.canSendInput && s.status != .working {
                     HStack(spacing: 6) {
                         NotchTextField(placeholder: "Antwort an Claude …", text: $reply) { sendReply() }
                         IconButton(symbol: "paperplane.fill", help: "Senden", tint: SessionStatus.working.color) { sendReply() }
@@ -56,40 +58,50 @@ struct SessionCardView: View {
         HStack(spacing: 6) {
             if let index, index <= 9 {
                 Text("\(index)")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .scaledFont(size: 9, weight: .bold, design: .monospaced)
                     .frame(width: 14, height: 14)
                     .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
                     .foregroundStyle(Color.primary.opacity(0.6))
             }
             StatusOrb(status: s.status, size: 8)
-            Text(s.displayTitle)
-                .font(.system(size: 12, weight: .semibold))
+            Text(s.repoName)
+                .scaledFont(size: 12, weight: .bold)
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .layoutPriority(1)
+            if let name = s.sessionLabel {
+                Text("·").scaledFont(size: 12).foregroundStyle(Color.primary.opacity(0.35))
+                Text(name)
+                    .scaledFont(size: 12, weight: .medium)
+                    .foregroundStyle(Color.primary.opacity(0.8))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(name)
+            }
             if s.taskSummary?.source == .linear, let ticket = s.taskSummary?.ticketId {
                 Chip(text: ticket, symbol: "ticket", color: .indigo)
             }
             Spacer(minLength: 4)
             StatusPill(status: s.status)
-            Text(s.lastActivity.relative).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
+            Text(s.lastActivity.relative).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4))
         }
     }
 
     private var metaRow: some View {
         HStack(spacing: 5) {
-            if s.displayTitle != s.repoName {
-                Text(s.repoName).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.primary.opacity(0.55)).lineLimit(1)
-            }
             if let branch = s.branch {
                 Chip(text: branch, symbol: "arrow.triangle.branch")
             }
-            if s.isWorktree { Chip(text: "Worktree", symbol: "square.stack.3d.up", color: .teal) }
-            if s.isContainerized { Chip(text: s.isAirlock ? "airlock" : "Container", symbol: "shippingbox", color: .cyan) }
+            if s.isWorktree { Chip(text: "Worktree", symbol: "square.stack.3d.up", color: .teal, help: "Läuft in einem separaten Git-Worktree") }
+            if s.isContainerized {
+                Chip(text: s.isAirlock ? "airlock" : "Container", symbol: "shippingbox", color: .cyan,
+                     help: s.isAirlock ? "Claude läuft isoliert in einem airlock-Container (Podman)" : "Claude läuft in einem Container")
+            }
+            if s.isDesktop { Chip(text: "Claude Desktop", symbol: "macwindow", color: .purple, help: "Session aus dem Code-Tab von Claude Desktop") }
             if let git = s.git { GitStatsView(git: git) }
             if let url = s.prUrl { PrBadge(url: url, status: store.prStatuses[url]) }
             Spacer(minLength: 0)
             if s.orphaned { Chip(text: s.tmuxSession != nil ? "tmux getrennt" : "verwaist", symbol: "link.badge.plus", color: .orange) }
-            if let term = s.terminalName { Text(term).font(.system(size: 9)).foregroundStyle(Color.primary.opacity(0.3)).lineLimit(1) }
+            if let term = s.terminalName { Text(term).scaledFont(size: 9).foregroundStyle(Color.primary.opacity(0.3)).lineLimit(1) }
         }
     }
 
@@ -98,14 +110,14 @@ struct SessionCardView: View {
         if s.status == .waiting, let tool = s.preview.lastTools.first {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
-                    Image(systemName: "wrench.and.screwdriver").font(.system(size: 9))
-                    Text(tool.name).font(.system(size: 10, weight: .bold))
-                    if let d = tool.description, d != tool.input { Text(d).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1) }
+                    Image(systemName: "wrench.and.screwdriver").scaledFont(size: 9)
+                    Text(tool.name).scaledFont(size: 10, weight: .bold)
+                    if let d = tool.description, d != tool.input { Text(d).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1) }
                 }
                 .foregroundStyle(SessionStatus.waiting.color)
                 if let input = tool.input {
                     Text(input)
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .scaledFont(size: 10.5, design: .monospaced)
                         .foregroundStyle(Color.primary.opacity(0.85))
                         .lineLimit(isSelected ? 6 : 2)
                         .textSelection(.enabled)
@@ -115,31 +127,31 @@ struct SessionCardView: View {
                 }
                 ForEach(tool.warnings, id: \.self) { w in
                     Label(w, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 9.5, weight: .medium))
+                        .scaledFont(size: 9.5, weight: .medium)
                         .foregroundStyle(.orange)
                 }
             }
         } else if let text = s.preview.assistantIsNewer ? s.preview.lastAssistantText : s.preview.lastUserMessage {
             HStack(alignment: .top, spacing: 5) {
                 Image(systemName: s.preview.assistantIsNewer ? "sparkle" : "person.fill")
-                    .font(.system(size: 9))
+                    .scaledFont(size: 9)
                     .foregroundStyle(Color.primary.opacity(0.35))
                     .padding(.top, 2)
                 Text(text)
-                    .font(.system(size: 11))
+                    .scaledFont(size: 11)
                     .foregroundStyle(Color.primary.opacity(0.65))
                     .lineLimit(isSelected ? 4 : 2)
             }
             if s.status == .working, let tool = s.preview.lastTools.last {
                 HStack(spacing: 4) {
                     ProgressView().controlSize(.mini).scaleEffect(0.6).frame(width: 10, height: 10)
-                    Text(tool.name).font(.system(size: 10, weight: .semibold))
-                    if let input = tool.input { Text(input).font(.system(size: 10, design: .monospaced)).lineLimit(1).truncationMode(.middle) }
+                    Text(tool.name).scaledFont(size: 10, weight: .semibold)
+                    if let input = tool.input { Text(input).scaledFont(size: 10, design: .monospaced).lineLimit(1).truncationMode(.middle) }
                 }
                 .foregroundStyle(SessionStatus.working.color.opacity(0.9))
             }
         } else if let d = s.taskSummary?.description, isSelected {
-            Text(d).font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(3)
+            Text(d).scaledFont(size: 11).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(3)
         }
     }
 
@@ -156,7 +168,7 @@ struct SessionCardView: View {
     private var actionRow: some View {
         HStack(spacing: 4) {
             if s.pid != nil {
-                IconButton(symbol: "macwindow", help: "Zum Terminal", shortcut: "↩") { store.focus(s) }
+                IconButton(symbol: "macwindow", help: s.isDesktop ? "In Claude Desktop öffnen" : "Zum Terminal", shortcut: "↩") { store.focus(s) }
             }
             if store.config.editorOption != nil {
                 IconButton(symbol: "chevron.left.forwardslash.chevron.right", help: "Im Editor öffnen", shortcut: "E") { store.openEditor(s) }
@@ -167,7 +179,7 @@ struct SessionCardView: View {
             IconButton(symbol: "folder", help: "Im Finder zeigen", shortcut: "F") { store.openFinder(s) }
             if let _ = s.prUrl {
                 IconButton(symbol: "arrow.up.right.square", help: "Pull Request öffnen", shortcut: "P", tint: .green) { store.openPR(s) }
-            } else if s.pid != nil && s.status == .idle {
+            } else if s.canSendInput && s.status == .idle {
                 IconButton(symbol: "arrow.triangle.pull", help: "Pull Request erstellen lassen", shortcut: "P") { store.createPR(s) }
             }
             if s.orphaned && s.tmuxSession != nil {
@@ -186,9 +198,9 @@ struct SessionCardView: View {
 
     private var cleanupConfirmation: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Worktree aufräumen?").font(.system(size: 11, weight: .bold))
+            Text("Worktree aufräumen?").scaledFont(size: 11, weight: .bold)
             Text("Beendet die Session, entfernt \(Paths.abbreviateHome(s.workingDirectory)) (auch ungespeicherte Änderungen) und löscht den lokalen Branch \(s.branch ?? "").")
-                .font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.6))
+                .scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.6))
             HStack {
                 PillButton(title: "Endgültig aufräumen", symbol: "trash", color: .red) {
                     confirmCleanup = false

@@ -6,6 +6,8 @@ public struct HookEvent: Equatable, Sendable {
     public var pid: Int32?
     /// Container hostname when the event came from a containerized Claude (airlock, devcontainer …).
     public var container: String?
+    /// `CLAUDE_CODE_HOST_SESSION_ID` – set when Claude Desktop's Code tab runs the CLI.
+    public var desktopSessionId: String?
     public var event: String
     public var sessionId: String?
     public var cwd: String?
@@ -29,6 +31,9 @@ public struct HookEvent: Equatable, Sendable {
         self.toolName = toolName
         self.timestamp = timestamp
     }
+
+    /// The event announces an open tool-permission prompt.
+    public var isPermissionPrompt: Bool { event == "Notification" && impliedStatus == .waiting }
 
     /// Status implied by this event, or nil if the event says nothing definitive.
     public var impliedStatus: SessionStatus? {
@@ -133,8 +138,9 @@ public enum HookManager {
       PIDJSON="$CLAUDE_PID"
     fi
 
+    DESKTOP=$(printf '%s' "${CLAUDE_CODE_HOST_SESSION_ID:-}" | tr -cd 'A-Za-z0-9_-')
     TMP="$EVENTS_DIR/.$KEY.$$.tmp"
-    printf '{"pid":%s,"container":"%s","ts":%s,"payload":%s}\n' "$PIDJSON" "$HOST" "$TS" "$INPUT" > "$TMP" && mv -f "$TMP" "$EVENTS_DIR/$KEY.json"
+    printf '{"pid":%s,"container":"%s","desktop":"%s","ts":%s,"payload":%s}\n' "$PIDJSON" "$HOST" "$DESKTOP" "$TS" "$INPUT" > "$TMP" && mv -f "$TMP" "$EVENTS_DIR/$KEY.json"
     exit 0
     """#
 
@@ -271,7 +277,7 @@ public enum HookManager {
         // Container events need a session id; host events need a PID.
         if pid == nil && sessionId == nil { return nil }
         let ts = (obj["ts"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970
-        return HookEvent(
+        var ev = HookEvent(
             pid: pid,
             container: pid == nil ? (container ?? "container") : nil,
             event: event,
@@ -283,6 +289,8 @@ public enum HookManager {
             toolName: nonEmpty(payload["tool_name"] as? String),
             timestamp: Date(timeIntervalSince1970: ts)
         )
+        ev.desktopSessionId = nonEmpty(obj["desktop"] as? String)
+        return ev
     }
 
     /// Read all event files; removes files older than 24h.

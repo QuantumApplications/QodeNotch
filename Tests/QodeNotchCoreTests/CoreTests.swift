@@ -29,15 +29,23 @@ final class StatusClassifierTests: XCTestCase {
         XCTAssertEqual(StatusClassifier.classify(.init(cpuPercent: 1, hasPendingToolUse: true, hookStatus: .waiting, hookTimestamp: now), now: now), .waiting)
     }
 
-    func testHookWorkingStuckOnToolBecomesWaiting() {
-        let old = now.addingTimeInterval(-20)
-        XCTAssertEqual(StatusClassifier.classify(.init(transcriptMtime: old, cpuPercent: 0, hasPendingToolUse: true, hookStatus: .working, hookTimestamp: old), now: now), .waiting)
-        XCTAssertEqual(StatusClassifier.classify(.init(transcriptMtime: now, cpuPercent: 0, hasPendingToolUse: true, hookStatus: .working, hookTimestamp: now), now: now), .working)
+    func testHookWorkingStaysWorkingDuringLongTools() {
+        // A long Bash run: pending tool_use, quiet transcript, no CPU (e.g. airlock).
+        let old = now.addingTimeInterval(-120)
+        XCTAssertEqual(StatusClassifier.classify(.init(transcriptMtime: old, cpuPercent: 0, hasPendingToolUse: true, hookStatus: .working, hookTimestamp: old), now: now), .working)
+    }
+
+    func testAwaitsPermission() {
+        XCTAssertTrue(StatusClassifier.awaitsPermission(status: .waiting, hookStatus: .waiting, hasPendingToolUse: true))
+        XCTAssertFalse(StatusClassifier.awaitsPermission(status: .idle, hookStatus: .idle, hasPendingToolUse: false))
+        XCTAssertFalse(StatusClassifier.awaitsPermission(status: .waiting, hookStatus: nil, hasPendingToolUse: false))
+        XCTAssertTrue(StatusClassifier.awaitsPermission(status: .waiting, hookStatus: nil, hasPendingToolUse: true))
     }
 
     func testHookIdle() {
         XCTAssertEqual(StatusClassifier.classify(.init(hookStatus: .idle), now: now), .idle)
-        XCTAssertEqual(StatusClassifier.classify(.init(isAskingForInput: true, hookStatus: .idle), now: now), .waiting)
+        // A closing "Soll ich …?" is not a permission prompt.
+        XCTAssertEqual(StatusClassifier.classify(.init(isAskingForInput: true, hookStatus: .idle), now: now), .idle)
     }
 }
 
@@ -399,5 +407,89 @@ final class HistoryTests: XCTestCase {
         XCTAssertTrue(c.editorOption?.alternateAppNames.contains("PyCharm CE") ?? false)
         XCTAssertEqual(c.theme, .light)
         XCTAssertEqual(c.resumeStrategy, .auto)
+    }
+}
+
+final class UsageTests: XCTestCase {
+    func testParseLimitsArray() {
+        let json = #"{"limits":[{"kind":"weekly_all","percent":18.5,"resets_at":"2026-11-20T10:00:00Z"},{"kind":"session","percent":42,"resets_at":"2026-11-17T15:00:00.000Z"},{"kind":"weekly_scoped","percent":7,"scope":{"model":{"id":"opus","display_name":"Opus"}}}]}"#
+        let l = UsageLimits.parse(Data(json.utf8), plan: "max")
+        XCTAssertEqual(l?.limits.map(\.kind), [.session, .weekly, .weeklyModel])
+        XCTAssertEqual(l?.limits[0].percent, 42)
+        XCTAssertNotNil(l?.limits[0].resetsAt)
+        XCTAssertEqual(l?.limits[2].title, "Woche (Opus)")
+        XCTAssertEqual(l?.plan, "max")
+    }
+
+    func testParseLegacyLimits() {
+        let json = #"{"five_hour":{"utilization":12.0,"resets_at":"2026-11-17T15:00:00Z"},"seven_day":{"utilization":30},"seven_day_opus":null}"#
+        let l = UsageLimits.parse(Data(json.utf8))
+        XCTAssertEqual(l?.limits.map(\.kind), [.session, .weekly])
+        XCTAssertNil(UsageLimits.parse(Data("{}".utf8)))
+    }
+
+    func testCredentialParsing() {
+        let c = UsageLimitsClient.parseCredential(Data(#"{"claudeAiOauth":{"accessToken":"tok","expiresAt":4102444800000,"subscriptionType":"max"}}"#.utf8))
+        XCTAssertEqual(c?.accessToken, "tok")
+        XCTAssertEqual(c?.plan, "max")
+        XCTAssertEqual(c?.isExpired, false)
+        XCTAssertNil(UsageLimitsClient.parseCredential(Data("{}".utf8)))
+    }
+
+    func testModelNames() {
+        XCTAssertEqual(ModelName.pretty("claude-opus-4-5-20251101"), "Opus 4.5")
+        XCTAssertEqual(ModelName.pretty("claude-sonnet-4-20250514"), "Sonnet 4")
+        XCTAssertEqual(ModelName.pretty("claude-3-5-sonnet-20241022"), "Sonnet 3.5")
+        XCTAssertEqual(ModelName.pretty("claude-fable-5-2"), "Fable 5.2")
+        XCTAssertEqual(ModelName.pretty("claude-opus-5-5[1m]"), "Opus 5.5 (1M)")
+        XCTAssertEqual(ModelName.pretty("gpt-x"), "gpt-x")
+    }
+
+    func testSessionNameModelAndTokenTotals() {
+        let lines = TranscriptReader.parse(#"""
+        {"type":"summary","summary":"Old summary"}
+        {"type":"user","message":{"role":"user","content":"hi"}}
+        {"type":"assistant","timestamp":"2026-11-17T10:00:00Z","message":{"id":"m1","model":"claude-opus-4-5","role":"assistant","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100},"content":[{"type":"text","text":"a"}]}}
+        {"type":"assistant","timestamp":"2026-11-17T10:00:00Z","message":{"id":"m1","model":"claude-opus-4-5","role":"assistant","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100},"content":[{"type":"tool_use","name":"Bash","input":{}}]}}
+        {"type":"custom-title","customTitle":"Login-Refactoring","sessionId":"s"}
+        """#)
+        XCTAssertEqual(TranscriptReader.sessionName(lines), "Login-Refactoring")
+        XCTAssertEqual(TranscriptReader.model(lines), "claude-opus-4-5")
+        let totals = TranscriptReader.usageTotals(lines)
+        XCTAssertEqual(totals.total.total, 115)
+        XCTAssertEqual(totals.byModel["claude-opus-4-5"]?.output, 5)
+    }
+
+    func testLocalUsageScannerIsIncremental() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        setenv("HOME", home, 1)
+        defer { unsetenv("HOME") }
+        let dir = Paths.claudeProjectsDir + "/-x"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let file = dir + "/s.jsonl"
+        let now = Date()
+        let ts = ISO8601DateFormatter().string(from: now)
+        func line(_ id: String, _ out: Int) -> String {
+            #"{"type":"assistant","timestamp":"\#(ts)","message":{"id":"\#(id)","model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":\#(out)}}}"# + "\n"
+        }
+        try (line("a", 10) + line("a", 10)).write(toFile: file, atomically: true, encoding: .utf8)
+        let scanner = LocalUsageScanner()
+        var r = await scanner.report(now: now)
+        XCTAssertEqual(r.days.count, 7)
+        XCTAssertEqual(r.today.total, 11)
+        let fh = try XCTUnwrap(FileHandle(forWritingAtPath: file))
+        fh.seekToEndOfFile()
+        fh.write(Data(line("b", 20).utf8))
+        try fh.close()
+        r = await scanner.report(now: now)
+        XCTAssertEqual(r.today.total, 32)
+        XCTAssertEqual(r.byModel.first?.model, "claude-sonnet-4-5")
+        XCTAssertEqual(TokenFormat.short(1_234_567), "1,2 Mio.")
+    }
+
+    func testDesktopDeepLink() {
+        XCTAssertEqual(SessionActions.claudeDesktopURL(hostSessionId: "local_abc-123"), "claude://code/continue?session=local_abc-123")
+        XCTAssertNil(SessionActions.claudeDesktopURL(hostSessionId: "local_../x"))
+        XCTAssertNil(SessionActions.claudeDesktopURL(hostSessionId: "abc"))
     }
 }

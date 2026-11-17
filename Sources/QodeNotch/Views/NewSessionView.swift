@@ -26,7 +26,7 @@ struct NewSessionView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 IconButton(symbol: "chevron.left", help: "Zurück") { store.route = .list }
-                Text("Neue Claude-Session").font(.system(size: 13, weight: .bold))
+                Text("Neue Claude-Session").scaledFont(size: 13, weight: .bold)
                 Spacer()
             }
 
@@ -40,7 +40,7 @@ struct NewSessionView: View {
                 }
                 if !repoPath.isEmpty {
                     Label(Paths.abbreviateHome(repoPath), systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.green)
+                        .scaledFont(size: 11, weight: .medium).foregroundStyle(.green)
                 }
                 if !filteredRepos.isEmpty && (repoPath.isEmpty || !filter.isEmpty) {
                     FittingScrollView(maxHeight: 120) {
@@ -48,9 +48,9 @@ struct NewSessionView: View {
                             ForEach(filteredRepos.prefix(60)) { repo in
                                 Button { pick(repo.path) } label: {
                                     HStack {
-                                        Image(systemName: "folder").font(.system(size: 10))
-                                        Text(repo.name).font(.system(size: 11, weight: .medium))
-                                        Text(Paths.abbreviateHome(repo.path)).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4)).lineLimit(1).truncationMode(.middle)
+                                        Image(systemName: "folder").scaledFont(size: 10)
+                                        Text(repo.name).scaledFont(size: 11, weight: .medium)
+                                        Text(Paths.abbreviateHome(repo.path)).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4)).lineLimit(1).truncationMode(.middle)
                                         Spacer()
                                     }
                                     .padding(.vertical, 3)
@@ -64,14 +64,14 @@ struct NewSessionView: View {
                     }
                 } else if repos.isEmpty && store.config.codeDirectories.isEmpty {
                     Text("Tipp: Code-Verzeichnisse in den Einstellungen hinterlegen, um Repos hier aufzulisten.")
-                        .font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
+                        .scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4))
                 }
             }
 
             // Worktree
             section("Branch") {
                 Toggle(isOn: $useWorktree) {
-                    Text("In neuem Git-Worktree arbeiten").font(.system(size: 11))
+                    Text("In neuem Git-Worktree arbeiten").scaledFont(size: 11)
                 }
                 .toggleStyle(.switch)
                 .controlSize(.mini)
@@ -86,10 +86,10 @@ struct NewSessionView: View {
                         .controlSize(.small)
                     }
                     if !branch.isEmpty && !SessionActions.isValidBranchName(branch) {
-                        Text("Ungültiger Branch-Name").font(.system(size: 10)).foregroundStyle(.red)
+                        Text("Ungültiger Branch-Name").scaledFont(size: 10).foregroundStyle(.red)
                     } else if !branch.isEmpty && !repoPath.isEmpty {
                         Text("→ \(Paths.abbreviateHome(SessionActions.worktreePath(repo: repoPath, branch: branch)))")
-                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(Color.primary.opacity(0.4))
+                            .scaledFont(size: 10, design: .monospaced).foregroundStyle(Color.primary.opacity(0.4))
                     }
                 }
             }
@@ -109,7 +109,7 @@ struct NewSessionView: View {
             // Prompt
             section("Erster Prompt (optional)") {
                 TextEditor(text: $prompt)
-                    .font(.system(size: 11))
+                    .scaledFont(size: 11)
                     .scrollContentBackground(.hidden)
                     .padding(4)
                     .frame(height: 64)
@@ -118,7 +118,7 @@ struct NewSessionView: View {
 
             HStack {
                 Text("\(store.config.terminalApp.displayName) · \(store.config.terminalOpenIn == .tab ? "neuer Tab" : "neues Fenster")\(store.config.terminalUseTmux ? " · tmux" : "")")
-                    .font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
+                    .scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4))
                 Spacer()
                 PillButton(title: creating ? "Starte …" : "Session starten", symbol: "play.fill", color: SessionStatus.working.color) { create() }
                     .disabled(!canCreate || creating)
@@ -139,7 +139,7 @@ struct NewSessionView: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(Color.primary.opacity(0.4))
+            Text(title.uppercased()).scaledFont(size: 9, weight: .bold).foregroundStyle(Color.primary.opacity(0.4))
             content()
         }
     }

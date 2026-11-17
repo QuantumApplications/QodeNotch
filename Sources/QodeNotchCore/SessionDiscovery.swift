@@ -29,7 +29,14 @@ public actor SessionDiscovery {
         let meta = SessionMetaStore.load()
         let tree = await treeT
         let containers = await ProcessScanner.containerClients(in: tree)
-        let pids = ProcessScanner.claudePids(in: tree) + containers.keys.sorted()
+        var pidSet = Set(ProcessScanner.claudePids(in: tree)).union(containers.keys)
+        // CLIs whose process isn't called "claude" (e.g. started by Claude Desktop's
+        // Code tab) still report through the hook: trust live PIDs from recent events.
+        for (pid, ev) in hooks.byPid where tree[pid] != nil && ev.event != "SessionEnd"
+            && Date().timeIntervalSince(ev.timestamp) < 12 * 3600 {
+            pidSet.insert(pid)
+        }
+        let pids = pidSet.sorted()
         let cwds = await ProcessScanner.workingDirectories(for: pids)
         let alive = Set(pids)
 
@@ -182,8 +189,10 @@ public actor SessionDiscovery {
         let lastActivity = [mtime, hook?.timestamp].compactMap { $0 }.max() ?? Date()
         let recentActivity = Date().timeIntervalSince(lastActivity) < 60
         let isWorktree = slow.mainWorktree != nil && slow.mainWorktree != cwd
+        let allLines = head + tail
+        let terminal: String? = hook?.desktopSessionId != nil ? "Claude Desktop" : terminalNameByPid[pid].flatMap { $0.isEmpty ? nil : $0 }
 
-        return ClaudeSession(
+        var session = ClaudeSession(
             id: hook?.sessionId ?? TranscriptReader.sessionId(tail) ?? "pid-\(pid)",
             pid: pid,
             workingDirectory: cwd,
@@ -203,10 +212,18 @@ public actor SessionDiscovery {
             orphaned: recentActivity ? false : orphaned.contains(pid),
             tmuxSession: tmuxSessionByPid[pid],
             cpuPercent: cpu,
-            terminalName: terminalNameByPid[pid].flatMap { $0.isEmpty ? nil : $0 },
+            terminalName: terminal,
             containerName: container?.containerName,
             containerRuntime: container?.runtime
         )
+        session.sessionName = TranscriptReader.sessionName(allLines)
+        session.model = TranscriptReader.model(tail) ?? TranscriptReader.model(head)
+        session.desktopSessionId = hook?.desktopSessionId
+        session.lastHookAt = hook?.timestamp
+        session.awaitingPermission = StatusClassifier.awaitsPermission(status: status, hookStatus: hook?.impliedStatus, hasPendingToolUse: pending)
+        // Claude Desktop sessions have no terminal: "orphaned" doesn't apply.
+        if session.isDesktop { session.orphaned = false }
+        return session
     }
 
     /// Force git/PR data to refresh on the next poll.

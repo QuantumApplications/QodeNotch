@@ -69,7 +69,7 @@ public actor SessionHistory {
         let fileId = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         let cwd = all.lazy.compactMap(\.cwd).first { !$0.isEmpty }
         // A `summary` line (written on compaction/resume) is a better title than the first prompt.
-        let summaryLine = all.lazy.compactMap { $0.type == "summary" ? $0.summary : nil }.first
+        let summaryLine = TranscriptReader.sessionName(all)
         return PastSession(
             id: fileId,
             transcriptPath: path,

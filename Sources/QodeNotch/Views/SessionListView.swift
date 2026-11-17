@@ -36,7 +36,7 @@ struct SessionListView: View {
     }
 
     private var maxListHeight: CGFloat {
-        CGFloat(store.config.maxExpandedHeight) - max(layout.geometry.notchHeight, 28) - 60
+        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 60 * store.config.scale
     }
 
     private func card(_ s: ClaudeSession) -> some View {
@@ -50,9 +50,9 @@ private struct GroupHeader: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: "folder").font(.system(size: 9))
-            Text(group.repoName).font(.system(size: 10, weight: .semibold))
-            Text(Paths.abbreviateHome(group.repoPath)).font(.system(size: 9)).lineLimit(1).truncationMode(.middle)
+            Image(systemName: "folder").scaledFont(size: 9)
+            Text(group.repoName).scaledFont(size: 10, weight: .semibold)
+            Text(Paths.abbreviateHome(group.repoPath)).scaledFont(size: 9).lineLimit(1).truncationMode(.middle)
                 .foregroundStyle(Color.primary.opacity(0.3))
             Spacer()
         }
@@ -67,10 +67,10 @@ private struct EmptyState: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "terminal").font(.system(size: 22)).foregroundStyle(Color.primary.opacity(0.35))
-            Text("Keine laufenden Claude-Sessions").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.7))
+            Image(systemName: "terminal").scaledFont(size: 22).foregroundStyle(Color.primary.opacity(0.35))
+            Text("Keine laufenden Claude-Sessions").scaledFont(size: 12, weight: .semibold).foregroundStyle(Color.primary.opacity(0.7))
             Text("Starte `claude` in einem Terminal oder lege hier eine neue Session an.")
-                .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.45)).multilineTextAlignment(.center)
+                .scaledFont(size: 11).foregroundStyle(Color.primary.opacity(0.45)).multilineTextAlignment(.center)
             HStack(spacing: 8) {
                 PillButton(title: "Neue Session", symbol: "plus", color: SessionStatus.working.color) { store.route = .newSession }
                 PillButton(title: "Alle Sessions", symbol: "clock.arrow.circlepath", color: SessionStatus.working.color, filled: false) { store.route = .history }
@@ -88,8 +88,8 @@ private struct HookWarning: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Claude-Code-Hooks nicht vollständig installiert").font(.system(size: 11, weight: .semibold))
-                Text(detail).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(2)
+                Text("Claude-Code-Hooks nicht vollständig installiert").scaledFont(size: 11, weight: .semibold)
+                Text(detail).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(2)
             }
             Spacer()
             PillButton(title: "Installieren", color: .yellow) { store.reinstallHooks() }
@@ -114,16 +114,17 @@ struct KeyboardHints: View {
             hint("E G F P", "Editor/Git/Finder/PR")
             hint("D", "Details")
             hint("H", "alle Sessions")
+            hint("U", "Limits")
             hint("esc", "schließen")
         }
-        .font(.system(size: 9))
+        .scaledFont(size: 9)
         .foregroundStyle(Color.primary.opacity(0.4))
         .frame(maxWidth: .infinity)
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
         HStack(spacing: 3) {
-            Text(key).font(.system(size: 9, weight: .bold, design: .monospaced))
+            Text(key).scaledFont(size: 9, weight: .bold, design: .monospaced)
                 .padding(.horizontal, 3)
                 .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
             Text(label)

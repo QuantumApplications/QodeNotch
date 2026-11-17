@@ -1,3 +1,4 @@
+import AppKit
 import QodeNotchCore
 import SwiftUI
 
@@ -56,8 +57,10 @@ struct StatusOrb: View {
     var size: CGFloat = 10
 
     @State private var animate = false
+    @Environment(\.notchScale) private var scale
 
     var body: some View {
+        let size = self.size * scale
         let color = status?.color ?? .gray.opacity(0.5)
         ZStack {
             if status == .working || status == .waiting {
@@ -90,8 +93,8 @@ struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: status.symbol).font(.system(size: 8, weight: .bold))
-            Text(status.label).font(.system(size: 10, weight: .semibold))
+            Image(systemName: status.symbol).scaledFont(size: 8, weight: .bold)
+            Text(status.label).scaledFont(size: 10, weight: .semibold)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
@@ -104,16 +107,18 @@ struct Chip: View {
     var text: String
     var symbol: String?
     var color: Color = Color.primary.opacity(0.6)
+    var help: String?
 
     var body: some View {
         HStack(spacing: 3) {
-            if let symbol { Image(systemName: symbol).font(.system(size: 8, weight: .semibold)) }
-            Text(text).font(.system(size: 10, weight: .medium)).lineLimit(1)
+            if let symbol { Image(systemName: symbol).scaledFont(size: 8, weight: .semibold) }
+            Text(text).scaledFont(size: 10, weight: .medium).lineLimit(1)
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 1.5)
         .foregroundStyle(color)
         .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+        .help(help ?? text)
     }
 }
 
@@ -123,14 +128,14 @@ struct GitStatsView: View {
     var body: some View {
         HStack(spacing: 5) {
             if git.isClean {
-                Text("sauber").foregroundStyle(Color.primary.opacity(0.4))
+                Text("keine Änderungen").foregroundStyle(Color.primary.opacity(0.4))
             } else {
                 if git.additions > 0 { Text("+\(git.additions)").foregroundStyle(.green) }
                 if git.deletions > 0 { Text("−\(git.deletions)").foregroundStyle(.red.opacity(0.9)) }
                 Text("\(git.changedFiles + git.untrackedFiles) Dat.").foregroundStyle(Color.primary.opacity(0.45))
             }
         }
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .scaledFont(size: 10, weight: .medium, design: .monospaced)
     }
 }
 
@@ -141,16 +146,16 @@ struct PrBadge: View {
     var body: some View {
         let (color, symbol) = style
         HStack(spacing: 3) {
-            Image(systemName: symbol).font(.system(size: 8, weight: .bold))
+            Image(systemName: symbol).scaledFont(size: 8, weight: .bold)
             Text("#\(status?.number ?? url.split(separator: "/").last.map(String.init) ?? "PR")")
-                .font(.system(size: 10, weight: .semibold))
+                .scaledFont(size: 10, weight: .semibold)
             if let s = status {
                 if s.unresolvedThreads > 0 {
-                    Image(systemName: "text.bubble").font(.system(size: 8))
-                    Text("\(s.unresolvedThreads)").font(.system(size: 9))
+                    Image(systemName: "text.bubble").scaledFont(size: 8)
+                    Text("\(s.unresolvedThreads)").scaledFont(size: 9)
                 }
                 if s.mergeable == "CONFLICTING" {
-                    Image(systemName: "arrow.triangle.merge").font(.system(size: 8)).foregroundStyle(.red)
+                    Image(systemName: "arrow.triangle.merge").scaledFont(size: 8).foregroundStyle(.red)
                 }
             }
         }
@@ -194,12 +199,13 @@ struct IconButton: View {
     var action: () -> Void
 
     @State private var hovering = false
+    @Environment(\.notchScale) private var scale
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 24, height: 22)
+                .scaledFont(size: 11, weight: .semibold)
+                .frame(width: 24 * scale, height: 22 * scale)
                 .foregroundStyle(tint.opacity(hovering ? 1 : 0.7))
                 .background(Color.primary.opacity(hovering ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 6))
         }
@@ -218,15 +224,16 @@ struct PillButton: View {
     var action: () -> Void
 
     @State private var hovering = false
+    @Environment(\.notchScale) private var scale
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .bold)) }
-                Text(title).font(.system(size: 11, weight: .semibold))
+                if let symbol { Image(systemName: symbol).scaledFont(size: 10, weight: .bold) }
+                Text(title).scaledFont(size: 11, weight: .semibold)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 10 * scale)
+            .padding(.vertical, 4 * scale)
             .foregroundStyle(filled ? Color.black : color)
             .background(filled ? color.opacity(hovering ? 1 : 0.88) : color.opacity(hovering ? 0.25 : 0.15), in: Capsule())
         }
@@ -248,7 +255,7 @@ struct NotchTextField: View {
     var body: some View {
         TextField(placeholder, text: $text)
             .textFieldStyle(.plain)
-            .font(.system(size: 12))
+            .scaledFont(size: 12)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
@@ -302,5 +309,58 @@ struct FittingScrollView<Content: View>: View {
         }
         .onPreferenceChange(ScrollContentHeightKey.self) { contentHeight = $0 }
         .frame(height: min(max(contentHeight, 1), maxHeight))
+    }
+}
+
+// MARK: - Scaling
+
+private struct NotchScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    /// User-selected size of the notch UI (Settings → Notch → Größe).
+    var notchScale: CGFloat {
+        get { self[NotchScaleKey.self] }
+        set { self[NotchScaleKey.self] = newValue }
+    }
+}
+
+private struct ScaledFont: ViewModifier {
+    var size: CGFloat
+    var weight: Font.Weight
+    var design: Font.Design
+    @Environment(\.notchScale) private var scale
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size * scale, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// System font whose size follows the notch scale setting.
+    func scaledFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design))
+    }
+}
+
+extension AppConfig {
+    var scale: CGFloat { CGFloat(uiScale) }
+    /// Expanded panel width/height grow with the UI scale so content still fits.
+    var scaledExpandedWidth: CGFloat { CGFloat(expandedWidth) * scale }
+    var scaledMaxHeight: CGFloat {
+        let screenLimit = (NSScreen.screens.map(\.frame.height).min() ?? 900) - 60
+        return min(CGFloat(maxExpandedHeight) * scale, screenLimit)
+    }
+}
+
+extension ClaudeSession {
+    /// Name shown next to the repo: own title (Details → ✎) > `/rename` or
+    /// Claude's summary > first prompt.
+    var sessionLabel: String? {
+        if taskSummary?.source == .user, let t = taskSummary?.title, !t.isEmpty { return t }
+        if let n = sessionName, !n.isEmpty { return n }
+        if let t = taskSummary?.title, !t.isEmpty { return t }
+        return nil
     }
 }

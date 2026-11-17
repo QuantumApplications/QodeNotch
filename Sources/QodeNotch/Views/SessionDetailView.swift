@@ -7,6 +7,8 @@ struct SessionDetailView: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var layout: NotchLayout
     @State private var conversation: [ConversationMessage] = []
+    @State private var usage = TokenUsage()
+    @State private var usageByModel: [String: TokenUsage] = [:]
     @State private var diffStat: String?
     @State private var reply = ""
     @State private var editing = false
@@ -22,7 +24,7 @@ struct SessionDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             if editing { editor }
-            if s.status == .waiting { approvalBox }
+            if s.awaitingPermission && s.canSendInput { approvalBox }
             Picker("", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -34,11 +36,11 @@ struct SessionDetailView: View {
                 switch tab {
                 case .conversation: conversationView
                 case .changes: changesView
-                case .info: infoView
+                case .info: FittingScrollView(maxHeight: maxBodyHeight) { infoView }
                 }
             }
 
-            if s.pid != nil {
+            if s.canSendInput {
                 HStack(spacing: 6) {
                     NotchTextField(placeholder: s.status == .working ? "Nachricht (wird nach der Arbeit gelesen) …" : "Antwort an Claude …", text: $reply) { sendReply() }
                     IconButton(symbol: "paperplane.fill", help: "Senden", tint: SessionStatus.working.color) { sendReply() }
@@ -46,13 +48,16 @@ struct SessionDetailView: View {
             }
         }
         .task(id: s.jsonlPath.map { $0 + "\(s.lastActivity.timeIntervalSince1970)" } ?? s.id) {
-            conversation = await store.loadConversation(s)
+            let t = await store.loadTranscript(s)
+            conversation = t.conversation
+            usage = t.usage
+            usageByModel = t.usageByModel
             diffStat = await store.loadDiffStat(s)
         }
     }
 
     private var maxBodyHeight: CGFloat {
-        CGFloat(store.config.maxExpandedHeight) - max(layout.geometry.notchHeight, 28) - 190
+        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 190 * store.config.scale
     }
 
     private var header: some View {
@@ -60,8 +65,13 @@ struct SessionDetailView: View {
             IconButton(symbol: "chevron.left", help: "Zurück", shortcut: "←") { store.route = .list }
             StatusOrb(status: s.status, size: 9)
             VStack(alignment: .leading, spacing: 1) {
-                Text(s.displayTitle).font(.system(size: 13, weight: .bold)).lineLimit(1)
-                Text(Paths.abbreviateHome(s.workingDirectory)).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.45)).lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 4) {
+                    Text(s.repoName).scaledFont(size: 13, weight: .bold).lineLimit(1)
+                    if let name = s.sessionLabel {
+                        Text("· " + name).scaledFont(size: 13, weight: .medium).foregroundStyle(Color.primary.opacity(0.75)).lineLimit(1)
+                    }
+                }
+                Text(Paths.abbreviateHome(s.workingDirectory)).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.45)).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
             StatusPill(status: s.status)
@@ -70,7 +80,7 @@ struct SessionDetailView: View {
                 editDescription = s.taskSummary?.description ?? ""
                 editing.toggle()
             }
-            if s.pid != nil { IconButton(symbol: "macwindow", help: "Zum Terminal", shortcut: "↩") { store.focus(s) } }
+            if s.pid != nil { IconButton(symbol: "macwindow", help: s.isDesktop ? "In Claude Desktop öffnen" : "Zum Terminal", shortcut: "↩") { store.focus(s) } }
             if store.config.editorOption != nil {
                 IconButton(symbol: "chevron.left.forwardslash.chevron.right", help: "Editor", shortcut: "E") { store.openEditor(s) }
             }
@@ -80,7 +90,7 @@ struct SessionDetailView: View {
             IconButton(symbol: "folder", help: "Finder", shortcut: "F") { store.openFinder(s) }
             if s.prUrl != nil {
                 IconButton(symbol: "arrow.up.right.square", help: "PR öffnen", shortcut: "P", tint: .green) { store.openPR(s) }
-            } else if s.pid != nil {
+            } else if s.canSendInput {
                 IconButton(symbol: "arrow.triangle.pull", help: "PR erstellen lassen", shortcut: "P") { store.createPR(s) }
             }
         }
@@ -106,12 +116,12 @@ struct SessionDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(s.preview.lastTools.enumerated()), id: \.offset) { _, tool in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(tool.name).font(.system(size: 11, weight: .bold)).foregroundStyle(SessionStatus.waiting.color)
+                    Text(tool.name).scaledFont(size: 11, weight: .bold).foregroundStyle(SessionStatus.waiting.color)
                     if let input = tool.input {
-                        Text(input).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).lineLimit(10)
+                        Text(input).scaledFont(size: 11, design: .monospaced).textSelection(.enabled).lineLimit(10)
                     }
                     ForEach(tool.warnings, id: \.self) { w in
-                        Label(w, systemImage: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                        Label(w, systemImage: "exclamationmark.triangle.fill").scaledFont(size: 10).foregroundStyle(.orange)
                     }
                 }
             }
@@ -131,7 +141,7 @@ struct SessionDetailView: View {
             FittingScrollView(maxHeight: maxBodyHeight) {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     if conversation.isEmpty {
-                        Text("Kein Verlauf gefunden.").font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.4))
+                        Text("Kein Verlauf gefunden.").scaledFont(size: 11).foregroundStyle(Color.primary.opacity(0.4))
                     }
                     ForEach(conversation.suffix(150)) { m in
                         MessageBubble(message: m).id(m.id)
@@ -155,11 +165,11 @@ struct SessionDetailView: View {
                     HStack {
                         Chip(text: git.branch, symbol: "arrow.triangle.branch")
                         GitStatsView(git: git)
-                        if git.untrackedFiles > 0 { Text("\(git.untrackedFiles) neu").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.45)) }
+                        if git.untrackedFiles > 0 { Text("\(git.untrackedFiles) neu").scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.45)) }
                     }
                 }
                 Text(diffStat ?? "Keine Änderungen gegenüber HEAD.")
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .scaledFont(size: 10.5, design: .monospaced)
                     .foregroundStyle(Color.primary.opacity(0.75))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -169,7 +179,23 @@ struct SessionDetailView: View {
 
     private var infoView: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if let m = s.model { info("Modell", "\(ModelName.pretty(m))  (\(m))") }
+            if let name = s.sessionName { info("Session-Name", name) }
+            if usage.total > 0 {
+                info("Tokens", "\(TokenFormat.short(usage.total)) gesamt · \(TokenFormat.short(usage.output)) Ausgabe · \(TokenFormat.short(usage.cacheRead)) aus Cache")
+                if usageByModel.count > 1 {
+                    ForEach(usageByModel.sorted { $0.value.total > $1.value.total }, id: \.key) { model, u in
+                        info("  " + ModelName.pretty(model), TokenFormat.short(u.total))
+                    }
+                }
+            }
             info("Pfad", Paths.abbreviateHome(s.workingDirectory))
+            if let git = s.git {
+                info("Git", git.isClean ? "keine uncommitteten Änderungen" : "\(git.changedFiles) geänderte, \(git.untrackedFiles) neue Dateien · +\(git.additions) −\(git.deletions) Zeilen")
+            }
+            if s.isAirlock { info("Umgebung", "airlock-Container (Claude läuft isoliert in Podman)") }
+            else if s.isContainerized { info("Umgebung", "Container") }
+            else if s.isDesktop { info("Umgebung", "Claude Desktop (Code-Tab)") }
             if let p = s.parentRepo { info("Haupt-Repo", Paths.abbreviateHome(p)) }
             if let b = s.branch { info("Branch", b) }
             info("Session-ID", s.id)
@@ -199,8 +225,8 @@ struct SessionDetailView: View {
 
     private func info(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top) {
-            Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.45)).frame(width: 100, alignment: .leading)
-            Text(value).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Color.primary.opacity(0.8)).textSelection(.enabled).lineLimit(2)
+            Text(label).scaledFont(size: 10, weight: .semibold).foregroundStyle(Color.primary.opacity(0.45)).frame(width: 100, alignment: .leading)
+            Text(value).scaledFont(size: 10.5, design: .monospaced).foregroundStyle(Color.primary.opacity(0.8)).textSelection(.enabled).lineLimit(2)
             Spacer(minLength: 0)
         }
     }
@@ -221,17 +247,17 @@ private struct MessageBubble: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let text = message.text {
                     Text(markdown(text))
-                        .font(.system(size: 11))
+                        .scaledFont(size: 11)
                         .foregroundStyle(Color.primary.opacity(isUser ? 0.95 : 0.8))
                         .textSelection(.enabled)
                         .lineLimit(isUser ? 8 : 24)
                 }
                 ForEach(Array(message.toolUses.enumerated()), id: \.offset) { _, tool in
                     HStack(spacing: 4) {
-                        Image(systemName: "wrench.and.screwdriver").font(.system(size: 8))
-                        Text(tool.name).font(.system(size: 9.5, weight: .bold))
+                        Image(systemName: "wrench.and.screwdriver").scaledFont(size: 8)
+                        Text(tool.name).scaledFont(size: 9.5, weight: .bold)
                         if let summary = tool.summary {
-                            Text(summary).font(.system(size: 9.5, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                            Text(summary).scaledFont(size: 9.5, design: .monospaced).lineLimit(1).truncationMode(.middle)
                         }
                     }
                     .foregroundStyle(Color.primary.opacity(0.5))

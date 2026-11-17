@@ -55,13 +55,36 @@ public enum SessionActions {
     // MARK: Terminal interaction
 
     public static func terminal(for session: ClaudeSession) async throws -> TerminalInfo {
+        guard session.desktopSessionId == nil else { throw ActionError.message("Diese Session läuft in Claude Desktop – bitte dort beantworten.") }
         guard let pid = session.pid else { throw TerminalError.noProcess }
         return await TerminalDetector.detect(pid: pid)
     }
 
     public static func focus(_ session: ClaudeSession) async throws {
+        if let desktop = session.desktopSessionId {
+            try await openInClaudeDesktop(hostSessionId: desktop)
+            return
+        }
         try await TerminalController.focus(try await terminal(for: session))
     }
+
+    /// Claude Desktop's own link to one Code-tab session (`local_<uuid>`).
+    public static func claudeDesktopURL(hostSessionId: String) -> String? {
+        guard hostSessionId.hasPrefix("local_"),
+              hostSessionId.range(of: "^local_[A-Za-z0-9_-]{1,128}$", options: .regularExpression) != nil else { return nil }
+        return "claude://code/continue?session=\(hostSessionId)"
+    }
+
+    public static func openInClaudeDesktop(hostSessionId: String?) async throws {
+        if let id = hostSessionId, let url = claudeDesktopURL(hostSessionId: id) {
+            try await Shell.runChecked("/usr/bin/open", [url], timeout: 10)
+        } else {
+            try await Shell.runChecked("/usr/bin/open", ["-a", "Claude"], timeout: 10)
+        }
+    }
+
+    /// Web sessions live on claude.ai; there is no public API to list them.
+    public static let claudeWebCodeURL = "https://claude.ai/code"
 
     public static func approve(_ session: ClaudeSession) async throws {
         try await TerminalController.sendKeystroke(try await terminal(for: session), .enter)

@@ -43,6 +43,12 @@ public enum StatusClassifier {
     }
 
     /// Combine hook status (authoritative) with transcript/CPU signals.
+    ///
+    /// With hooks, "waiting" only ever comes from Claude Code's own permission
+    /// notification. Earlier heuristics ("tool pending + quiet transcript",
+    /// "last answer sounds like a question") misfired on long-running tools –
+    /// above all in containers, where Claude's CPU is invisible – and on normal
+    /// answers ending in "Soll ich …?".
     public static func classify(_ i: Input, now: Date = Date()) -> SessionStatus {
         guard i.pidAlive else { return .finished }
         guard let hook = i.hookStatus else { return heuristic(i, now: now) }
@@ -55,20 +61,20 @@ public enum StatusClassifier {
             if let m = i.transcriptMtime, let h = i.hookTimestamp, m.timeIntervalSince(h) > 1, !i.hasPendingToolUse { return .working }
             return .waiting
         case .working:
-            // No Notification hook arrived but Claude is clearly stuck on a tool prompt.
-            let age = i.transcriptMtime.map { now.timeIntervalSince($0) } ?? .infinity
-            let hookAge = i.hookTimestamp.map { now.timeIntervalSince($0) } ?? .infinity
-            if i.hasPendingToolUse && age > 8 && hookAge > 8 && i.cpuPercent < 3 { return .waiting }
-            if i.hasError && i.cpuPercent < 3 && age > 5 { return .errored }
             return .working
         case .idle:
-            if i.hasError { return .errored }
-            if i.isAskingForInput { return .waiting }
-            return .idle
+            return i.hasError ? .errored : .idle
         case .finished:
             return .finished
         case .errored:
             return .errored
         }
+    }
+
+    /// Whether approve/deny applies: a real permission prompt is open.
+    public static func awaitsPermission(status: SessionStatus, hookStatus: SessionStatus?, hasPendingToolUse: Bool) -> Bool {
+        guard status == .waiting else { return false }
+        if hookStatus != nil { return hookStatus == .waiting }
+        return hasPendingToolUse
     }
 }

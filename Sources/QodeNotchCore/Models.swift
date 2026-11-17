@@ -142,6 +142,20 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
     /// Set when Claude runs in a container (e.g. airlock); `pid` is then the host-side runtime client.
     public var containerName: String?
     public var containerRuntime: String?
+    /// `/rename` title or Claude Code's own summary of the session.
+    public var sessionName: String?
+    /// Model id of the latest response (e.g. "claude-opus-4-5-20251101").
+    public var model: String?
+    /// Claude Desktop's id when the session runs in Desktop's Code tab.
+    public var desktopSessionId: String?
+    /// True only while Claude shows a tool-permission prompt (approve/deny makes sense).
+    public var awaitingPermission: Bool = false
+    /// Time of the latest hook event for this session.
+    public var lastHookAt: Date?
+
+    public var isDesktop: Bool { desktopSessionId != nil }
+    /// Keystrokes can only reach sessions that live in a terminal.
+    public var canSendInput: Bool { pid != nil && desktopSessionId == nil }
 
     public var isContainerized: Bool { containerRuntime != nil }
     public var isAirlock: Bool { containerName?.hasPrefix("airlock-") ?? false }

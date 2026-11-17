@@ -90,6 +90,10 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var showKeyboardHints: Bool = true
     public var groupByRepo: Bool = true
     public var theme: Theme = .dark
+    /// Size of text and controls in the notch (1.0 = 100 %).
+    public var uiScale: Double = 1.0
+    /// Fetch plan limits (5 h / weekly) with Claude Code's login.
+    public var showLimits: Bool = true
     public var resumeStrategy: ResumeStrategy = .auto
     public var launchAtLogin: Bool = false
 
@@ -185,6 +189,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         showKeyboardHints = d(.showKeyboardHints, showKeyboardHints)
         groupByRepo = d(.groupByRepo, groupByRepo)
         theme = d(.theme, theme)
+        uiScale = min(max(d(.uiScale, uiScale), 0.8), 1.6)
+        showLimits = d(.showLimits, showLimits)
         resumeStrategy = d(.resumeStrategy, resumeStrategy)
         launchAtLogin = d(.launchAtLogin, launchAtLogin)
         hotkeyToggle = d(.hotkeyToggle, hotkeyToggle)

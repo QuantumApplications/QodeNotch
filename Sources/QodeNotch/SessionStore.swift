@@ -9,6 +9,7 @@ enum NotchRoute: Equatable {
     case detail(String)
     case newSession
     case history
+    case usage
 }
 
 /// Central app state: polls sessions, tracks UI state, performs actions.
@@ -27,6 +28,7 @@ final class SessionStore: ObservableObject {
             guard config != oldValue else { return }
             try? config.save()
             configDidChange.send(config)
+            if config.showLimits && !oldValue.showLimits { refreshLimits(force: true) }
         }
     }
     let configDidChange = PassthroughSubject<AppConfig, Never>()
@@ -50,6 +52,7 @@ final class SessionStore: ObservableObject {
     private let discovery = SessionDiscovery()
     private var pollTask: Task<Void, Never>?
     private var prTask: Task<Void, Never>?
+    private var usageTask: Task<Void, Never>?
     private var previousStatus: [String: SessionStatus] = [:]
     private var isFirstPoll = true
 
@@ -65,6 +68,14 @@ final class SessionStore: ObservableObject {
             while !Task.isCancelled {
                 await self?.poll()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        usageTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            while !Task.isCancelled {
+                self?.refreshLimits()
+                self?.refreshUsage()
+                try? await Task.sleep(nanoseconds: 600_000_000_000)
             }
         }
         prTask = Task { [weak self] in
@@ -93,10 +104,19 @@ final class SessionStore: ObservableObject {
     private func poll() async {
         var found = await discovery.discover(includeFinished: config.showFinishedSessions)
         let now = Date()
-        actedOn = actedOn.filter { now.timeIntervalSince($0.value.at) < 4 }
+        // After approve/deny the permission hook stays the newest event until the
+        // tool finishes (can take minutes). Keep the optimistic state until a newer
+        // hook event arrives; without hooks fall back to a short grace period.
+        actedOn = actedOn.filter { now.timeIntervalSince($0.value.at) < 15 * 60 }
         for i in found.indices {
-            if let acted = actedOn[found[i].id], found[i].status == .waiting {
+            guard let acted = actedOn[found[i].id] else { continue }
+            let newerHook = found[i].lastHookAt.map { $0 > acted.at } ?? false
+            let expired = found[i].lastHookAt == nil && now.timeIntervalSince(acted.at) > 4
+            if newerHook || expired || found[i].status != .waiting {
+                actedOn.removeValue(forKey: found[i].id)
+            } else {
                 found[i].status = acted.status
+                found[i].awaitingPermission = false
             }
         }
         found.sort { lhs, rhs in
@@ -123,6 +143,7 @@ final class SessionStore: ObservableObject {
                 Notifier.shared.notify(session: s, kind: .waiting, config: config, suppress: isExpanded && !config.alwaysNotify)
                 attentionRequested.send(s.id)
             case .idle where old == .working:
+                refreshLimits()
                 Notifier.shared.notify(session: s, kind: .finished, config: config, suppress: isExpanded && !config.alwaysNotify)
             case .errored:
                 Notifier.shared.notify(session: s, kind: .errored, config: config, suppress: isExpanded && !config.alwaysNotify)
@@ -232,7 +253,10 @@ final class SessionStore: ObservableObject {
     }
 
     private func applyOptimistic(_ id: String, _ status: SessionStatus) {
-        if let i = sessions.firstIndex(where: { $0.id == id }) { sessions[i].status = status }
+        if let i = sessions.firstIndex(where: { $0.id == id }) {
+            sessions[i].status = status
+            sessions[i].awaitingPermission = false
+        }
     }
 
     func focus(_ s: ClaudeSession) {
@@ -360,11 +384,49 @@ final class SessionStore: ObservableObject {
 
     // MARK: Detail data
 
-    func loadConversation(_ s: ClaudeSession) async -> [ConversationMessage] {
-        guard let path = s.jsonlPath else { return [] }
+    struct SessionTranscript {
+        var conversation: [ConversationMessage] = []
+        var usage = TokenUsage()
+        var usageByModel: [String: TokenUsage] = [:]
+    }
+
+    func loadTranscript(_ s: ClaudeSession) async -> SessionTranscript {
+        guard let path = s.jsonlPath else { return SessionTranscript() }
         return await Task.detached(priority: .userInitiated) {
-            TranscriptReader.conversation(TranscriptReader.readAll(path))
+            let lines = TranscriptReader.readAll(path)
+            let totals = TranscriptReader.usageTotals(lines)
+            return SessionTranscript(conversation: TranscriptReader.conversation(lines), usage: totals.total, usageByModel: totals.byModel)
         }.value
+    }
+
+    // MARK: Limits & usage
+
+    @Published private(set) var limits: UsageLimits?
+    @Published private(set) var limitsError: String?
+    @Published private(set) var usageReport: UsageReport?
+    private var lastLimitsFetch = Date.distantPast
+    private var limitsInFlight = false
+
+    /// Plan limits: fetched at most every 2 minutes (when asked), else every 10.
+    func refreshLimits(force: Bool = false) {
+        guard config.showLimits, !limitsInFlight else { return }
+        let minInterval: TimeInterval = force ? 30 : 120
+        guard Date().timeIntervalSince(lastLimitsFetch) > minInterval else { return }
+        limitsInFlight = true
+        lastLimitsFetch = Date()
+        Task {
+            do {
+                limits = try await UsageLimitsClient.fetch()
+                limitsError = nil
+            } catch {
+                limitsError = error.localizedDescription
+            }
+            limitsInFlight = false
+        }
+    }
+
+    func refreshUsage() {
+        Task { usageReport = await LocalUsageScanner.shared.report() }
     }
 
     func loadDiffStat(_ s: ClaudeSession) async -> String? {
