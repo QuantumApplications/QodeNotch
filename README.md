@@ -1,6 +1,6 @@
 # QodeNotch
 
-Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-Sessions direkt in der **Notch** deines MacBooks zeigt und steuert – mit dem Funktionsumfang von [claude-control](https://github.com/sverrirsig/claude-control), aber als Notch-Insel im Stil von [CodeIsland](https://github.com/wxtsky/CodeIsland).
+Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-, **OpenAI Codex**- und **GitHub Copilot CLI**-Sessions direkt in der **Notch** deines MacBooks zeigt und steuert – mit dem Funktionsumfang von [claude-control](https://github.com/sverrirsig/claude-control), aber als Notch-Insel im Stil von [CodeIsland](https://github.com/wxtsky/CodeIsland).
 
 - **Eingeklappt:** Ein schwarzer „Flügel“ links und rechts der Notch – farbiger Status-Punkt (pulsiert bei *arbeitet*, hüpft bei *wartet*), Repo-Name der wichtigsten Session und Zähler für wartende/aktive Sessions.
 - **Aufgeklappt** (Hover, Klick, ⌘⇧I oder automatisch bei Freigabe-Anfragen): Liste aller Sessions mit Status, Task, Branch, Git-Diff, PR-Status und letzter Nachricht, Freigabe-Buttons, Antwortfeld, Schnellzugriffe und Detailansicht.
@@ -10,10 +10,11 @@ Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-S
 
 | Bereich | Was QodeNotch kann |
 | --- | --- |
+| **Agents** | Claude Code (Anthropic), Codex CLI (OpenAI) und GitHub Copilot CLI: Erkennung, Status per Hooks (`~/.claude/settings.json`, `~/.codex/hooks.json` + `features.hooks`, `~/.codex/config.toml`, `~/.copilot/hooks/qodenotch.json`), Verlauf, Modell, Tokens, Freigaben, neue Sessions und Fortsetzen (`claude --resume`, `codex resume`, `copilot --resume`). Codex-Rate-Limits aus den Codex-Verläufen. |
 | **Erkennung** | Findet alle `claude`-Prozesse (`ps`, `lsof`), ordnet ihnen per Hook-Ereignis exakt das richtige JSONL-Transcript zu (Fallback: neuestes Transcript im Projektordner). |
 | **Status** | *Arbeitet*, *Wartet* (Tool-Freigabe oder Rückfrage), *Bereit*, *Fehler*, *Beendet* – in Echtzeit über Claude-Code-Hooks, ergänzt um CPU- und Transcript-Heuristiken. |
 | **Kontext** | Task-Titel (erster Prompt oder Linear-Ticket aus MCP-Ergebnissen), letzte Nachricht, aktuelles Tool samt Eingabe, Warnungen bei riskanten Bash-Befehlen (`sudo`, `rm -rf`, `--force`, `eval`, Pipe in Shell …). |
-| **Git & PRs/MRs** | Branch, geänderte Dateien, +/- Zeilen, Worktree-Erkennung. GitHub-PRs über `gh`, GitLab-Merge-Requests (auch self-hosted) über `glab` – automatisch nach Git-Remote erkannt: CI-Checks bzw. Pipeline, Review/Approvals, offene Threads, Merge-Konflikte, merged/closed. |
+| **Git & PRs/MRs** | Branch, geänderte Dateien, +/- Zeilen, Worktree-Erkennung. GitHub-PRs über `gh`, GitLab-Merge-Requests (auch self-hosted) über `glab`, Forgejo/Codeberg-PRs über die Forgejo-API mit dem Login der Forgejo-CLI `fj` – automatisch nach Git-Remote erkannt: CI-Checks bzw. Pipeline, Review/Approvals, offene Threads, Merge-Konflikte, merged/closed. |
 | **Aktionen** | Erlauben / Immer erlauben / Ablehnen, Antwort senden, zum Terminal-Tab springen, Editor, Git-Client, Finder, PR öffnen oder „PR erstellen“-Prompt senden, Session beenden, Titel/Beschreibung überschreiben. |
 | **Neue Sessions** | Repo aus Code-Verzeichnissen wählen (oder Ordner), optional neuen Git-Worktree `<repo>-<branch>` von einem Basisbranch anlegen, Start-Prompt, optional in tmux. |
 | **Alle Sessions** | Verlauf aller in `~/.claude/projects` gespeicherten Sessions (Titel, Repo, Pfad, Branch, Zeit), durchsuchbar, Öffnen per Klick/Doppelklick oder `H`. Normal per `claude --resume <id>`; mit airlock wird in den Ordner gewechselt und `claude` gestartet – airlock setzt die letzte Session automatisch fort. Laufende Sessions werden stattdessen im Terminal fokussiert. |

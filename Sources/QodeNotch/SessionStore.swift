@@ -21,6 +21,8 @@ final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [ClaudeSession] = []
     @Published private(set) var prStatuses: [String: PrStatus] = [:]
     @Published private(set) var hookState: HookManager.InstallState = .notInstalled
+    @Published private(set) var codexHookState: HookManager.InstallState = .notInstalled
+    @Published private(set) var copilotHookState: HookManager.InstallState = .notInstalled
     @Published private(set) var history: [PastSession] = []
     @Published private(set) var isLoadingHistory = false
     @Published var config: AppConfig = .load() {
@@ -29,6 +31,9 @@ final class SessionStore: ObservableObject {
             try? config.save()
             configDidChange.send(config)
             if config.showLimits && !oldValue.showLimits { refreshLimits(force: true) }
+            if config.enableCodex != oldValue.enableCodex || config.enableCopilot != oldValue.enableCopilot {
+                applyAgentIntegrations()
+            }
             if config.forge != oldValue.forge {
                 let forge = config.forge
                 Task { await PullRequestService.shared.setPreference(forge) }
@@ -67,6 +72,7 @@ final class SessionStore: ObservableObject {
 
     func start() {
         hookState = HookManager.install()
+        applyAgentIntegrations()
         let forge = config.forge
         Task { await PullRequestService.shared.setPreference(forge) }
         pollTask?.cancel()
@@ -95,12 +101,23 @@ final class SessionStore: ObservableObject {
 
     func reinstallHooks() {
         hookState = HookManager.install()
+        applyAgentIntegrations()
+    }
+
+    /// Install or remove Codex / Copilot hooks according to the settings.
+    func applyAgentIntegrations() {
+        if config.enableCodex { codexHookState = AgentHooks.installCodex() } else { AgentHooks.uninstallCodex(); codexHookState = .notInstalled }
+        if config.enableCopilot { copilotHookState = AgentHooks.installCopilot() } else { AgentHooks.uninstallCopilot(); copilotHookState = .notInstalled }
     }
 
     func uninstallHooks() {
         do {
             try HookManager.uninstall()
+            AgentHooks.uninstallCodex()
+            AgentHooks.uninstallCopilot()
             hookState = HookManager.state()
+            codexHookState = .notInstalled
+            copilotHookState = .notInstalled
             showToast("Hooks entfernt")
         } catch {
             showToast(error.localizedDescription, error: true)
@@ -255,7 +272,7 @@ final class SessionStore: ObservableObject {
     func alwaysAllow(_ s: ClaudeSession) {
         actedOn[s.id] = (.working, Date())
         applyOptimistic(s.id, .working)
-        perform("Immer erlaubt") { try await SessionActions.choose(s, option: 2) }
+        perform("Immer erlaubt") { try await SessionActions.alwaysAllow(s) }
     }
 
     private func applyOptimistic(_ id: String, _ status: SessionStatus) {
@@ -281,7 +298,7 @@ final class SessionStore: ObservableObject {
             openURL(url)
             return
         }
-        let prompt = s.isGitLab ? config.createMrPrompt : config.createPrPrompt
+        let prompt = s.isGitLab ? config.createMrPrompt : s.isForgejo ? config.createForgejoPrompt : config.createPrPrompt
         send(s, message: prompt.isEmpty ? "/create-pr" : prompt)
     }
 
@@ -432,8 +449,13 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    @Published private(set) var codexLimits: UsageLimits?
+
     func refreshUsage() {
-        Task { usageReport = await LocalUsageScanner.shared.report() }
+        Task {
+            usageReport = await LocalUsageScanner.shared.report()
+            codexLimits = await Task.detached { AgentStores.codexLimits() }.value
+        }
     }
 
     func loadDiffStat(_ s: ClaudeSession) async -> String? {

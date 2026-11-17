@@ -442,7 +442,7 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(ModelName.pretty("claude-3-5-sonnet-20241022"), "Sonnet 3.5")
         XCTAssertEqual(ModelName.pretty("claude-fable-5-2"), "Fable 5.2")
         XCTAssertEqual(ModelName.pretty("claude-opus-5-5[1m]"), "Opus 5.5 (1M)")
-        XCTAssertEqual(ModelName.pretty("gpt-x"), "gpt-x")
+        XCTAssertEqual(ModelName.pretty("llama-x"), "llama-x")
     }
 
     func testSessionNameModelAndTokenTotals() {
@@ -575,5 +575,157 @@ final class IDEAndForgeTests: XCTestCase {
         XCTAssertEqual(merged?.state, "MERGED")
         XCTAssertEqual(merged?.checks, .passing)
         XCTAssertEqual(merged?.reviewDecision, "APPROVED")
+    }
+}
+
+final class AgentTests: XCTestCase {
+    func testAgentProcessNames() {
+        XCTAssertEqual(ProcessScanner.agent(forComm: "/opt/homebrew/bin/codex"), .codex)
+        XCTAssertEqual(ProcessScanner.agent(forComm: "/usr/local/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/codex/codex-aarch64-apple-darwin"), .codex)
+        XCTAssertNil(ProcessScanner.agent(forComm: "/Applications/Codex.app/Contents/MacOS/Codex"))
+        XCTAssertEqual(ProcessScanner.agent(forComm: "copilot"), .copilot)
+        XCTAssertEqual(ProcessScanner.agent(forComm: "claude"), .claude)
+        XCTAssertNil(ProcessScanner.agent(forComm: "codex-mcp-server"))
+    }
+
+    func testCodexRolloutIsTranslated() {
+        let lines = TranscriptReader.parse(#"""
+        {"timestamp":"2026-11-17T10:00:00.000Z","type":"session_meta","payload":{"id":"0199a-uuid","cwd":"/Users/me/app","git":{"branch":"feat/x"}}}
+        {"timestamp":"2026-11-17T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5-codex","cwd":"/Users/me/app"}}
+        {"timestamp":"2026-11-17T10:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"Fix the tests"}}
+        {"timestamp":"2026-11-17T10:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"bash\",\"-lc\",\"sudo rm -rf build\"]}","call_id":"c1"}}
+        {"timestamp":"2026-11-17T10:00:04.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50}},"rate_limits":{"primary":{"used_percent":12.5,"window_minutes":300,"resets_in_seconds":600},"secondary":{"used_percent":40,"window_minutes":10080}}}}
+        """#)
+        XCTAssertEqual(TranscriptReader.sessionId(lines), "0199a-uuid")
+        XCTAssertEqual(TranscriptReader.branch(lines), "feat/x")
+        XCTAssertEqual(TranscriptReader.model(lines), "gpt-5-codex")
+        XCTAssertTrue(TranscriptReader.hasPendingToolUse(lines))
+        let p = TranscriptReader.preview(lines)
+        XCTAssertEqual(p.lastUserMessage, "Fix the tests")
+        XCTAssertEqual(p.lastTools.first?.name, "Bash")
+        XCTAssertEqual(p.lastTools.first?.input, "sudo rm -rf build")
+        XCTAssertFalse(p.lastTools.first?.warnings.isEmpty ?? true)
+        let usage = TranscriptReader.usageTotals(lines)
+        XCTAssertEqual(usage.total.input, 600)
+        XCTAssertEqual(usage.total.cacheRead, 400)
+        XCTAssertEqual(TranscriptReader.taskSummary(lines)?.title, "Fix the tests")
+        XCTAssertEqual(ModelName.pretty("gpt-5-codex"), "GPT-5 Codex")
+
+        let rl = AgentStores.parseCodexRateLimits(["primary": ["used_percent": 12.5, "window_minutes": 300, "resets_in_seconds": 600],
+                                                   "secondary": ["used_percent": 40, "window_minutes": 10080]], observedAt: Date())
+        XCTAssertEqual(rl?.limits.map(\.kind), [.session, .weekly])
+        XCTAssertEqual(rl?.limits.first?.percent, 12.5)
+    }
+
+    func testCopilotEventsAreTranslated() {
+        let lines = TranscriptReader.parse(#"""
+        {"type":"session.start","data":{"sessionId":"cp-1","context":{"cwd":"/Users/me/app"}},"timestamp":"2026-11-17T10:00:00Z"}
+        {"type":"session.model_change","data":{"newModel":"claude-sonnet-4.5"},"timestamp":"2026-11-17T10:00:00Z"}
+        {"type":"user.message","data":{"content":"Add a README"},"timestamp":"2026-11-17T10:00:01Z"}
+        {"type":"assistant.message","data":{"content":"Sure, writing it now."},"timestamp":"2026-11-17T10:00:02Z"}
+        {"type":"tool.execution_start","data":{"toolName":"bash","arguments":{"command":"ls -la"}},"timestamp":"2026-11-17T10:00:03Z"}
+        """#)
+        XCTAssertEqual(lines.compactMap(\.cwd).first, "/Users/me/app")
+        let p = TranscriptReader.preview(lines)
+        XCTAssertEqual(p.lastUserMessage, "Add a README")
+        XCTAssertEqual(p.lastTools.first?.input, "ls -la")
+        XCTAssertTrue(TranscriptReader.hasPendingToolUse(lines))
+        XCTAssertEqual(TranscriptReader.model(lines), "claude-sonnet-4.5")
+    }
+
+    func testCodexConfigFlag() {
+        XCTAssertEqual(CodexConfig.enablingHooks(""), "features.hooks = true\n")
+        XCTAssertEqual(CodexConfig.enablingHooks("model = \"o3\"\n\n[profiles.x]\nmodel = \"y\"\n"),
+                       "model = \"o3\"\n\nfeatures.hooks = true\n[profiles.x]\nmodel = \"y\"\n")
+        XCTAssertEqual(CodexConfig.enablingHooks("[features]\nweb_search = true\n"), "[features]\nhooks = true\nweb_search = true\n")
+        XCTAssertEqual(CodexConfig.enablingHooks("[features]\nhooks = false\n"), "[features]\nhooks = true\n")
+        let already = "[features]\nhooks = true # on\n"
+        XCTAssertEqual(CodexConfig.enablingHooks(already), already)
+        XCTAssertNil(CodexConfig.enablingHooks("features.x = 1\n[features]\ny = 2\n"))
+        XCTAssertTrue(CodexConfig.hooksEnabled("features.codex_hooks = true"))
+    }
+
+    func testCodexAndCopilotHookInstall() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        try FileManager.default.createDirectory(atPath: home + "/.codex", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: home + "/.copilot", withIntermediateDirectories: true)
+        setenv("HOME", home, 1)
+        unsetenv("CODEX_HOME")
+        defer { unsetenv("HOME") }
+        try #"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/usr/bin/true"}]}]}}"#.write(toFile: home + "/.codex/hooks.json", atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(AgentHooks.installCodex(), .installed)
+        XCTAssertEqual(AgentHooks.installCodex(), .installed)   // idempotent
+        let stop = (AgentHooks.readJSON(home + "/.codex/hooks.json")?["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]]
+        XCTAssertEqual(stop?.count, 2)
+        XCTAssertTrue(CodexConfig.hooksEnabled(try String(contentsOfFile: home + "/.codex/config.toml", encoding: .utf8)))
+        AgentHooks.uninstallCodex()
+        XCTAssertEqual(((AgentHooks.readJSON(home + "/.codex/hooks.json")?["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]])?.count, 1)
+
+        XCTAssertEqual(AgentHooks.installCopilot(), .installed)
+        XCTAssertEqual(AgentHooks.readJSON(AgentHooks.copilotHookFile)?["version"] as? Int, 1)
+
+        // The copilot hook command records the event name passed as argument.
+        XCTAssertEqual(HookManager.install(), .installed)
+        var env = ProcessInfo.processInfo.environment
+        env["HOME"] = home
+        env["QODENOTCH_IN_CONTAINER"] = "0"
+        let r = Shell.runSync("/bin/sh", ["-c", AgentHooks.command(agent: .copilot, event: "preToolUse")], environment: env,
+                              input: #"{"sessionId":"cp-1","cwd":"/tmp","toolName":"bash"}"#)
+        XCTAssertEqual(r.exitCode, 0)
+        let ev = try XCTUnwrap(HookManager.readAll().byPid.values.first)
+        XCTAssertEqual(ev.agent, .copilot)
+        XCTAssertEqual(ev.event, "preToolUse")
+        XCTAssertEqual(ev.sessionId, "cp-1")
+        XCTAssertEqual(ev.toolName, "bash")
+        XCTAssertEqual(ev.impliedStatus, .working)
+        XCTAssertEqual(HookEvent(pid: 1, event: "PermissionRequest", timestamp: Date()).impliedStatus, nil)
+        var codexPerm = HookEvent(pid: 1, event: "PermissionRequest", timestamp: Date())
+        codexPerm.agent = .codex
+        XCTAssertEqual(codexPerm.impliedStatus, .waiting)
+    }
+
+    func testResumeCommandsPerAgent() {
+        var past = PastSession(id: "abc-1", transcriptPath: "/t", workingDirectory: "/x", title: "t", summary: nil, branch: nil, lastActivity: Date(), startedAt: nil)
+        let config = AppConfig()
+        past.agent = .codex
+        XCTAssertEqual(SessionResumer.command(for: past, config: config), "codex resume abc-1")
+        past.agent = .copilot
+        XCTAssertEqual(SessionResumer.command(for: past, config: config), "copilot --resume abc-1")
+        XCTAssertEqual(SessionActions.startCommand(agent: .copilot, hasPrompt: true, config: config), "copilot -i")
+        XCTAssertEqual(SessionActions.startCommand(agent: .codex, hasPrompt: true, config: config), "codex")
+    }
+}
+
+final class ForgejoTests: XCTestCase {
+    func testRepoFromRemote() {
+        XCTAssertEqual(ForgejoAPI.repo(fromRemote: "git@codeberg.org:me/app.git"), ForgejoAPI.Repo(host: "codeberg.org", owner: "me", name: "app"))
+        XCTAssertEqual(ForgejoAPI.repo(fromRemote: "https://git.firma.de/team/sub/app"), ForgejoAPI.Repo(host: "git.firma.de", owner: "sub", name: "app"))
+        XCTAssertEqual(ForgejoAPI.repo(fromRemote: "ssh://git@git.firma.de:2222/team/app.git")?.owner, "team")
+        let p = ForgejoAPI.pull(fromURL: "https://codeberg.org/me/app/pulls/12")
+        XCTAssertEqual(p?.number, 12)
+        XCTAssertEqual(p?.repo.name, "app")
+        XCTAssertTrue(PullRequestService.isForgejoURL("https://codeberg.org/me/app/pulls/12"))
+        XCTAssertFalse(PullRequestService.isForgejoURL("https://github.com/me/app/pull/12"))
+    }
+
+    func testCredentialsAndStatusParsing() {
+        let keys = #"{"hosts":{"codeberg.org":{"type":"Application","token":"abc"},"git.x.de:3000":{"type":"OAuth","token":"t2","refresh_token":"r","expires_at":"x"}}}"#
+        let logins = FjCredentials.parse(Data(keys.utf8))
+        XCTAssertEqual(logins?["codeberg.org"], "abc")
+        XCTAssertEqual(logins?["git.x.de:3000"], "t2")
+
+        XCTAssertEqual(ForgejoAPI.matchPR([["number": 3, "head": ["ref": "feat"], "html_url": "u3"], ["number": 5, "head": ["ref": "feat"], "html_url": "u5"], ["number": 9, "head": ["ref": "main"], "html_url": "u9"]], branch: "feat"), "u5")
+
+        let s = ForgejoAPI.parseStatus(
+            pr: ["state": "open", "merged": false, "mergeable": false, "html_url": "https://codeberg.org/me/app/pulls/5", "comments": 2],
+            combined: ["statuses": [["status": "success"], ["status": "pending"]]],
+            reviews: [["state": "APPROVED", "user": ["login": "a"]], ["state": "REQUEST_CHANGES", "user": ["login": "b"]]],
+            fallbackUrl: "")
+        XCTAssertEqual(s.state, "OPEN")
+        XCTAssertEqual(s.checks, .pending)
+        XCTAssertEqual(s.mergeable, "CONFLICTING")
+        XCTAssertEqual(s.reviewDecision, "CHANGES_REQUESTED")
+        XCTAssertEqual(s.number, "5")
     }
 }

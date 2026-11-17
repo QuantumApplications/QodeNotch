@@ -20,8 +20,17 @@ struct UsageView: View {
                 }
             }
 
-            section("Limits deines Abos") { limitsBlock }
-            section("Token-Nutzung dieses Macs (letzte 7 Tage)") { usageBlock }
+            section("Claude-Abo (Anthropic)") { limitsBlock }
+            if let codex = store.codexLimits {
+                section("Codex (OpenAI\(codex.plan.map { " · " + $0.capitalized } ?? ""))") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(codex.limits) { LimitRow(limit: $0) }
+                        Text("Aus der letzten Codex-Session, Stand \(codex.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                            .scaledFont(size: 9.5).foregroundStyle(Color.primary.opacity(0.35))
+                    }
+                }
+            }
+            section("Token-Nutzung dieses Macs – alle Agents (7 Tage)") { usageBlock }
         }
         .onAppear {
             store.refreshLimits()
@@ -72,7 +81,7 @@ struct UsageView: View {
                             .foregroundStyle(Color.primary.opacity(0.7))
                     }
                 }
-                Text("Summe aller Tokens (Eingabe, Cache, Ausgabe) aus den lokalen Transcripts in ~/.claude/projects – Sessions auf anderen Geräten oder im Web sind nicht enthalten.")
+                Text("Summe aller Tokens (Eingabe, Cache, Ausgabe) aus den lokalen Verläufen von Claude Code, Codex und Copilot CLI – Sessions auf anderen Geräten oder im Web sind nicht enthalten. Copilot schreibt Token-Zahlen nicht immer mit.")
                     .scaledFont(size: 9.5).foregroundStyle(Color.primary.opacity(0.35))
             }
         } else {

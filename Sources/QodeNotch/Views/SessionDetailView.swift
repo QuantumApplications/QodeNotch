@@ -57,7 +57,7 @@ struct SessionDetailView: View {
     }
 
     private var maxBodyHeight: CGFloat {
-        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 190 * store.config.scale
+        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 222 * store.config.scale
     }
 
     private var header: some View {
@@ -179,6 +179,7 @@ struct SessionDetailView: View {
 
     private var infoView: some View {
         VStack(alignment: .leading, spacing: 4) {
+            info("Agent", "\(s.agent.label) (\(s.agent.vendor))")
             if let m = s.model { info("Modell", "\(ModelName.pretty(m))  (\(m))") }
             if let name = s.sessionName { info("Session-Name", name) }
             if usage.total > 0 {

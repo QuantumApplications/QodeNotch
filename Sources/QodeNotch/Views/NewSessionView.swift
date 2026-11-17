@@ -17,6 +17,7 @@ struct NewSessionView: View {
     @State private var tmuxSessions: [TerminalDetector.TmuxSessionInfo] = []
     @State private var tmuxChoice = ""
     @State private var creating = false
+    @State private var agent: Agent = .claude
 
     private var filteredRepos: [RepoInfo] {
         filter.isEmpty ? repos : repos.filter { $0.name.localizedCaseInsensitiveContains(filter) || $0.path.localizedCaseInsensitiveContains(filter) }
@@ -26,8 +27,15 @@ struct NewSessionView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 IconButton(symbol: "chevron.left", help: "Zurück") { store.route = .list }
-                Text("Neue Claude-Session").scaledFont(size: 13, weight: .bold)
+                Text("Neue Session").scaledFont(size: 13, weight: .bold)
                 Spacer()
+                Picker("", selection: $agent) {
+                    ForEach(Agent.allCases) { a in Label(a.label, systemImage: a.symbol).tag(a) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: 300)
             }
 
             // Repository
@@ -117,7 +125,7 @@ struct NewSessionView: View {
             }
 
             HStack {
-                Text("\(store.config.terminalApp.displayName) · \(store.config.terminalOpenIn == .tab ? "neuer Tab" : "neues Fenster")\(store.config.terminalUseTmux ? " · tmux" : "")")
+                Text("\(store.config.command(for: agent)) · \(store.config.terminalApp.displayName) · \(store.config.terminalOpenIn == .tab ? "neuer Tab" : "neues Fenster")\(store.config.terminalUseTmux ? " · tmux" : "")")
                     .scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4))
                 Spacer()
                 PillButton(title: creating ? "Starte …" : "Session starten", symbol: "play.fill", color: SessionStatus.working.color) { create() }
@@ -185,7 +193,8 @@ struct NewSessionView: View {
             branchName: useWorktree ? branch : nil,
             baseBranch: useWorktree ? baseBranch : nil,
             prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt,
-            tmuxSession: tmuxChoice.isEmpty ? nil : tmuxChoice)
+            tmuxSession: tmuxChoice.isEmpty ? nil : tmuxChoice,
+            agent: agent)
         Task {
             _ = await store.createSession(req)
             creating = false

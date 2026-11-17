@@ -41,7 +41,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             if let tool = session.preview.lastTools.first {
                 content.body = "\(tool.name): \(tool.input ?? tool.description ?? "Freigabe benötigt")"
             } else {
-                content.body = session.preview.lastAssistantText ?? "Claude braucht eine Eingabe."
+                content.body = session.preview.lastAssistantText ?? "\(session.agent.label) braucht eine Eingabe."
             }
         case .finished:
             content.title = "\(session.repoName) ist fertig"

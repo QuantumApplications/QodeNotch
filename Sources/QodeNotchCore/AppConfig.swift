@@ -79,13 +79,14 @@ public struct HotKeySpec: Codable, Equatable, Sendable {
 
 /// Where pull/merge requests come from.
 public enum ForgePreference: String, Codable, CaseIterable, Sendable {
-    case auto, github, gitlab
+    case auto, github, gitlab, forgejo
 
     public var label: String {
         switch self {
         case .auto: return "Automatisch (nach Git-Remote)"
         case .github: return "GitHub (gh)"
         case .gitlab: return "GitLab (glab)"
+        case .forgejo: return "Forgejo / Codeberg (fj)"
         }
     }
 }
@@ -149,7 +150,14 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var hotkeyApproveKey: HotKeySpec = .defaultApprove
     public var hotkeyDenyKey: HotKeySpec = .defaultDeny
     public var forge: ForgePreference = .auto
+    /// Commands that start Codex / Copilot CLI (Claude uses `initialCommand`).
+    public var codexCommand: String = "codex"
+    public var copilotCommand: String = "copilot"
+    /// Install hooks for these agents when their config directory exists.
+    public var enableCodex: Bool = true
+    public var enableCopilot: Bool = true
     public var createMrPrompt: String = AppConfig.defaultCreateMrPrompt
+    public var createForgejoPrompt: String = AppConfig.defaultCreateForgejoPrompt
 
     public init() {}
 
@@ -161,6 +169,9 @@ public struct AppConfig: Codable, Equatable, Sendable {
 
     public static let defaultCreateMrPrompt =
         "Please commit all your changes with a descriptive commit message, push the branch to origin, and create a GitLab merge request with `glab mr create`. Include a clear title and description of what changed and why."
+
+    public static let defaultCreateForgejoPrompt =
+        "Please commit all your changes with a descriptive commit message, push the branch to origin, and create a pull request on Forgejo with `fj pr create`. Include a clear title and description of what changed and why."
 
     public static let editors: [EditorOption] = [
         .init(id: "none", label: "Keiner", command: "", appName: ""),
@@ -199,6 +210,18 @@ public struct AppConfig: Codable, Equatable, Sendable {
     ]
 
     public static let systemSounds = ["None", "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"]
+
+    /// Command that starts `agent`.
+    public func command(for agent: Agent) -> String {
+        let c: String
+        switch agent {
+        case .claude: c = initialCommand
+        case .codex: c = codexCommand
+        case .copilot: c = copilotCommand
+        }
+        let trimmed = c.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? agent.defaultCommand : trimmed
+    }
 
     public var editorOption: EditorOption? { Self.editors.first { $0.id == editor && $0.id != "none" } }
     public var gitGuiOption: AppOption? { Self.gitGuis.first { $0.id == gitGui && $0.id != "none" } }
@@ -252,7 +275,12 @@ public struct AppConfig: Codable, Equatable, Sendable {
         hotkeyApproveKey = d(.hotkeyApproveKey, hotkeyApproveKey)
         hotkeyDenyKey = d(.hotkeyDenyKey, hotkeyDenyKey)
         forge = d(.forge, forge)
+        codexCommand = d(.codexCommand, codexCommand)
+        copilotCommand = d(.copilotCommand, copilotCommand)
+        enableCodex = d(.enableCodex, enableCodex)
+        enableCopilot = d(.enableCopilot, enableCopilot)
         createMrPrompt = d(.createMrPrompt, createMrPrompt)
+        createForgejoPrompt = d(.createForgejoPrompt, createForgejoPrompt)
     }
 
     public static func load() -> AppConfig {

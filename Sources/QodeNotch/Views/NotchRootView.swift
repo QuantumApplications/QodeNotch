@@ -125,7 +125,6 @@ struct ExpandedView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .frame(height: max(layout.geometry.notchHeight, 28))
             Group {
                 switch store.route {
                 case .list:
@@ -163,26 +162,39 @@ struct ExpandedView: View {
         .animation(.easeInOut(duration: 0.2), value: store.toast)
     }
 
+    /// Title row beside the notch (left: name, right: pin + quit) and a toolbar
+    /// below it – everything doesn't fit next to the camera housing.
     private var header: some View {
-        HStack(spacing: 6) {
+        VStack(spacing: 4) {
             HStack(spacing: 6) {
-                StatusOrb(status: store.aggregateStatus, size: 8)
-                Text("QodeNotch").scaledFont(size: 12, weight: .bold)
-                Text(summary).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1)
+                HStack(spacing: 6) {
+                    StatusOrb(status: store.aggregateStatus, size: 8)
+                    Text("QodeNotch").scaledFont(size: 12, weight: .bold).lineLimit(1)
+                }
+                .padding(.leading, 8)
+                Spacer(minLength: layout.geometry.hasNotch ? layout.geometry.notchWidth : 12)
+                HStack(spacing: 4) {
+                    IconButton(symbol: store.isPinned ? "pin.fill" : "pin",
+                               help: store.isPinned ? "Angeheftet – Notch bleibt offen. Klicken zum Lösen" : "Anheften – Notch bleibt offen, auch wenn die Maus sie verlässt",
+                               tint: store.isPinned ? SessionStatus.waiting.color : Color.primary) { store.isPinned.toggle() }
+                    QuitButton()
+                }
+                .padding(.trailing, 4)
             }
-            .padding(.leading, 8)
-            Spacer(minLength: layout.geometry.hasNotch ? layout.geometry.notchWidth : 12)
+            .frame(height: max(layout.geometry.notchHeight, 28))
             HStack(spacing: 4) {
+                Text(summary).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1)
+                    .padding(.leading, 8)
+                Spacer(minLength: 4)
                 LimitBadge()
-                IconButton(symbol: "chart.bar", help: "Limits & Nutzung", shortcut: "U") { store.route = .usage }
                 IconButton(symbol: "plus", help: "Neue Session", shortcut: "N") { store.route = .newSession }
                 IconButton(symbol: "clock.arrow.circlepath", help: "Alle Sessions", shortcut: "H") { store.route = .history }
+                IconButton(symbol: "chart.bar", help: "Limits & Nutzung", shortcut: "U") { store.route = .usage }
                 IconButton(symbol: "arrow.clockwise", help: "Aktualisieren", shortcut: "R") { store.refreshNow() }
-                IconButton(symbol: store.isPinned ? "pin.fill" : "pin", help: "Angeheftet lassen",
-                           tint: store.isPinned ? SessionStatus.waiting.color : Color.primary) { store.isPinned.toggle() }
                 IconButton(symbol: "gearshape", help: "Einstellungen") { AppDelegate.shared?.openSettings() }
+                    .padding(.trailing, 4)
             }
-            .padding(.trailing, 4)
+            .padding(.bottom, 6)
         }
         .foregroundStyle(Color.primary)
     }
@@ -194,5 +206,21 @@ struct ExpandedView: View {
         if store.waitingCount > 0 { parts.append("\(store.waitingCount) wartend") }
         if store.workingCount > 0 { parts.append("\(store.workingCount) aktiv") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Quits QodeNotch; asks for a second click so a stray click doesn't close it.
+struct QuitButton: View {
+    @State private var armed = false
+
+    var body: some View {
+        if armed {
+            PillButton(title: "Beenden?", symbol: "power", color: .red) { NSApp.terminate(nil) }
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { armed = false }
+                }
+        } else {
+            IconButton(symbol: "power", help: "QodeNotch beenden") { armed = true }
+        }
     }
 }

@@ -68,6 +68,7 @@ struct SessionCardView: View {
                 .scaledFont(size: 12, weight: .bold)
                 .lineLimit(1)
                 .layoutPriority(1)
+            if s.agent != .claude { AgentChip(agent: s.agent) }
             if let name = s.sessionLabel {
                 Text("·").scaledFont(size: 12).foregroundStyle(Color.primary.opacity(0.35))
                 Text(name)

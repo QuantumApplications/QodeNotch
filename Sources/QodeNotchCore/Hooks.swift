@@ -8,6 +8,8 @@ public struct HookEvent: Equatable, Sendable {
     public var container: String?
     /// `CLAUDE_CODE_HOST_SESSION_ID` – set when Claude Desktop's Code tab runs the CLI.
     public var desktopSessionId: String?
+    /// Which agent fired the hook.
+    public var agent: Agent = .claude
     public var event: String
     public var sessionId: String?
     public var cwd: String?
@@ -33,17 +35,29 @@ public struct HookEvent: Equatable, Sendable {
     }
 
     /// The event announces an open tool-permission prompt.
-    public var isPermissionPrompt: Bool { event == "Notification" && impliedStatus == .waiting }
+    public var isPermissionPrompt: Bool { impliedStatus == .waiting }
 
     /// Status implied by this event, or nil if the event says nothing definitive.
     public var impliedStatus: SessionStatus? {
         switch event {
-        case "UserPromptSubmit", "SubagentStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact":
+        case "UserPromptSubmit", "SubagentStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact", "PostCompact":
             return .working
-        case "Stop", "SessionStart":
+        case "Stop", "SessionStart", "Interrupt":
             return .idle
         case "SessionEnd":
             return .finished
+        // Codex: asks before running a command that needs approval.
+        case "PermissionRequest":
+            return agent == .codex ? .waiting : nil
+        // GitHub Copilot CLI (camelCase events)
+        case "userPromptSubmitted", "preToolUse", "postToolUse", "subagentStart":
+            return .working
+        case "sessionStart", "agentStop":
+            return .idle
+        case "sessionEnd":
+            return .finished
+        case "errorOccurred":
+            return .errored
         case "Notification":
             let type = (notificationType ?? "").lowercased()
             let msg = (message ?? "").lowercased()
@@ -67,6 +81,12 @@ public struct HookSnapshot: Sendable {
     public init(byPid: [Int32: HookEvent] = [:], containerEvents: [HookEvent] = []) {
         self.byPid = byPid
         self.containerEvents = containerEvents
+    }
+
+    /// Newest host event of an agent for a working directory (fallback when the
+    /// hook could not identify the agent's PID).
+    public func latest(agent: Agent, cwd: String) -> HookEvent? {
+        byPid.values.filter { $0.agent == agent && $0.cwd == cwd }.max { $0.timestamp < $1.timestamp }
     }
 
     /// Newest container event for a working directory.
@@ -99,9 +119,12 @@ public enum HookManager {
     /// processes to transcripts and statuses without polling Claude itself.
     public static let script = #"""
     #!/bin/sh
-    # QodeNotch status hook — records the latest Claude Code hook event.
-    # Lives in ~/.claude/qodenotch so it also works when Claude runs in a container
-    # that mounts ~/.claude (e.g. airlock); events are written next to it.
+    # QodeNotch status hook — records the latest hook event of Claude Code,
+    # Codex or GitHub Copilot CLI. Arguments: [agent] [event name, if the
+    # payload lacks one]. Lives in ~/.claude/qodenotch so it also works when
+    # Claude runs in a container that mounts ~/.claude (e.g. airlock).
+    AGENT=$(printf '%s' "${1:-claude}" | tr -cd 'a-z')
+    EVENT=$(printf '%s' "${2:-}" | tr -cd 'A-Za-z')
     DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
     [ -z "$DIR" ] && exit 0
     EVENTS_DIR="$DIR/events"
@@ -115,20 +138,23 @@ public enum HookManager {
     [ -n "${QODENOTCH_IN_CONTAINER:-}" ] && IN_CONTAINER=$QODENOTCH_IN_CONTAINER
     if [ "$IN_CONTAINER" = 1 ]; then
       # Inside a container: PIDs mean nothing on the host, key by session id.
-      SID=$(printf '%s' "$INPUT" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' | tr -cd 'A-Za-z0-9_-')
+      SID=$(printf '%s' "$INPUT" | grep -o '"session_\{0,1\}[iI][dD]"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/' | tr -cd 'A-Za-z0-9_-')
       [ -z "$SID" ] && exit 0
       HOST=$(cat /etc/hostname 2>/dev/null | tr -cd 'A-Za-z0-9._-')
       KEY="c-$SID"
       PIDJSON=null
     else
-      # Find the claude process that invoked this hook (hooks may run via an
+      # Find the agent process that invoked this hook (hooks may run via an
       # intermediate shell, so walk up a few levels).
       PID=$PPID
       CLAUDE_PID=""
       i=0
       while [ $i -lt 6 ] && [ -n "$PID" ] && [ "$PID" -gt 1 ] 2>/dev/null; do
         COMM=$(ps -o comm= -p "$PID" 2>/dev/null | sed 's#.*/##')
-        if [ "$COMM" = "claude" ]; then CLAUDE_PID=$PID; break; fi
+        case "$COMM" in
+          claude|codex|codex-*|copilot) CLAUDE_PID=$PID; break ;;
+          node) if ps -ww -o args= -p "$PID" 2>/dev/null | grep -q '@github/copilot'; then CLAUDE_PID=$PID; break; fi ;;
+        esac
         PID=$(ps -o ppid= -p "$PID" 2>/dev/null | tr -d ' ')
         i=$((i+1))
       done
@@ -140,7 +166,7 @@ public enum HookManager {
 
     DESKTOP=$(printf '%s' "${CLAUDE_CODE_HOST_SESSION_ID:-}" | tr -cd 'A-Za-z0-9_-')
     TMP="$EVENTS_DIR/.$KEY.$$.tmp"
-    printf '{"pid":%s,"container":"%s","desktop":"%s","ts":%s,"payload":%s}\n' "$PIDJSON" "$HOST" "$DESKTOP" "$TS" "$INPUT" > "$TMP" && mv -f "$TMP" "$EVENTS_DIR/$KEY.json"
+    printf '{"pid":%s,"agent":"%s","event":"%s","container":"%s","desktop":"%s","ts":%s,"payload":%s}\n' "$PIDJSON" "$AGENT" "$EVENT" "$HOST" "$DESKTOP" "$TS" "$INPUT" > "$TMP" && mv -f "$TMP" "$EVENTS_DIR/$KEY.json"
     exit 0
     """#
 
@@ -270,10 +296,10 @@ public enum HookManager {
     public static func parseEventFile(_ data: Data, fallbackPid: Int32?) -> HookEvent? {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         let payload = obj["payload"] as? [String: Any] ?? obj
-        guard let event = (payload["hook_event_name"] as? String) ?? (obj["event"] as? String) else { return nil }
+        guard let event = nonEmpty(payload["hook_event_name"] as? String) ?? nonEmpty(obj["event"] as? String) else { return nil }
         let container = nonEmpty(obj["container"] as? String)
         let pid = (obj["pid"] as? NSNumber)?.int32Value ?? fallbackPid
-        let sessionId = nonEmpty(payload["session_id"] as? String)
+        let sessionId = nonEmpty(payload["session_id"] as? String) ?? nonEmpty(payload["sessionId"] as? String)
         // Container events need a session id; host events need a PID.
         if pid == nil && sessionId == nil { return nil }
         let ts = (obj["ts"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970
@@ -283,13 +309,14 @@ public enum HookManager {
             event: event,
             sessionId: sessionId,
             cwd: nonEmpty(payload["cwd"] as? String),
-            transcriptPath: nonEmpty(payload["transcript_path"] as? String),
+            transcriptPath: nonEmpty(payload["transcript_path"] as? String) ?? nonEmpty(payload["transcriptPath"] as? String),
             notificationType: nonEmpty(payload["notification_type"] as? String),
             message: nonEmpty(payload["message"] as? String),
-            toolName: nonEmpty(payload["tool_name"] as? String),
+            toolName: nonEmpty(payload["tool_name"] as? String) ?? nonEmpty(payload["toolName"] as? String),
             timestamp: Date(timeIntervalSince1970: ts)
         )
         ev.desktopSessionId = nonEmpty(obj["desktop"] as? String)
+        ev.agent = nonEmpty(obj["agent"] as? String).flatMap(Agent.init(rawValue:)) ?? .claude
         return ev
     }
 

@@ -29,13 +29,18 @@ public actor SessionDiscovery {
         let hooks = HookManager.readAll()
         let meta = SessionMetaStore.load()
         let tree = await treeT
-        let containers = await ProcessScanner.containerClients(in: tree)
-        var pidSet = Set(ProcessScanner.claudePids(in: tree)).union(containers.keys)
+        async let containersT = ProcessScanner.containerClients(in: tree)
+        async let agentsT = ProcessScanner.agentPids(in: tree)
+        let (containers, agentPids) = await (containersT, agentsT)
+        var agentOf = agentPids
+        for pid in containers.keys { agentOf[pid] = .claude }
+        var pidSet = Set(agentPids.keys).union(containers.keys)
         // CLIs whose process isn't called "claude" (e.g. started by Claude Desktop's
         // Code tab) still report through the hook: trust live PIDs from recent events.
-        for (pid, ev) in hooks.byPid where tree[pid] != nil && ev.event != "SessionEnd"
+        for (pid, ev) in hooks.byPid where tree[pid] != nil && ev.agent == .claude && ev.event != "SessionEnd"
             && Date().timeIntervalSince(ev.timestamp) < 12 * 3600 {
             pidSet.insert(pid)
+            if agentOf[pid] == nil { agentOf[pid] = .claude }
         }
         let pids = pidSet.sorted()
         let cwds = await ProcessScanner.workingDirectories(for: pids)
@@ -53,6 +58,10 @@ public actor SessionDiscovery {
                 if let cwd = cwds[pid], let ev = hooks.containerEvent(cwd: cwd) { hookFor[pid] = ev }
             } else if let ev = hooks.byPid[pid] {
                 hookFor[pid] = ev
+            } else if let agent = agentOf[pid], agent != .claude, let cwd = cwds[pid],
+                      let ev = hooks.latest(agent: agent, cwd: cwd) {
+                // Hook ran via a wrapper process whose PID differs (e.g. Copilot's bash).
+                hookFor[pid] = ev
             }
         }
 
@@ -69,9 +78,10 @@ public actor SessionDiscovery {
                 let entry = tree[pid]
                 let hook = hookFor[pid]
                 let container = containers[pid]
+                let agent = agentOf[pid] ?? hook?.agent ?? .claude
                 let claimedCopy = claimed
                 group.addTask {
-                    await self.build(pid: pid, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, container: container, claimed: claimedCopy)
+                    await self.build(pid: pid, agent: agent, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, container: container, claimed: claimedCopy)
                 }
             }
             for await s in group { if let s { sessions.append(s) } }
@@ -158,10 +168,10 @@ public actor SessionDiscovery {
         return c
     }
 
-    private func build(pid: Int32, cwd: String, cpu: Double, hook: HookEvent?, container: ProcessScanner.ContainerClient?,
+    private func build(pid: Int32, agent: Agent, cwd: String, cpu: Double, hook: HookEvent?, container: ProcessScanner.ContainerClient?,
                        claimed: Set<String>) async -> ClaudeSession? {
         let transcript = hook?.transcriptPath.map(HookManager.hostTranscriptPath)
-            ?? TranscriptReader.latestTranscript(in: Paths.projectDir(for: cwd), excluding: claimed)
+            ?? AgentStores.latestTranscript(agent: agent, cwd: cwd, excluding: claimed)
 
         var tail: [TranscriptLine] = []
         var head: [TranscriptLine] = []
@@ -185,9 +195,16 @@ public actor SessionDiscovery {
             effectiveCpu = age < 5 ? 10 : 0
         }
 
+        var hookStatus = hook?.impliedStatus
+        // Copilot CLI has no permission hook: a tool announced by preToolUse that
+        // neither finished nor uses CPU after a few seconds is waiting for approval.
+        if agent == .copilot, let h = hook, h.event == "preToolUse", pending,
+           Date().timeIntervalSince(h.timestamp) > 4, cpu < 2 {
+            hookStatus = .waiting
+        }
         let status = StatusClassifier.classify(.init(
             pidAlive: true, transcriptMtime: mtime, cpuPercent: effectiveCpu, hasError: hasError, isAskingForInput: asking,
-            hasPendingToolUse: pending, hookStatus: hook?.impliedStatus, hookTimestamp: hook?.timestamp))
+            hasPendingToolUse: pending, hookStatus: hookStatus, hookTimestamp: hook?.timestamp))
 
         let lastActivity = [mtime, hook?.timestamp].compactMap { $0 }.max() ?? Date()
         let recentActivity = Date().timeIntervalSince(lastActivity) < 60
@@ -196,7 +213,7 @@ public actor SessionDiscovery {
         let terminal: String? = hook?.desktopSessionId != nil ? "Claude Desktop" : terminalNameByPid[pid].flatMap { $0.isEmpty ? nil : $0 }
 
         var session = ClaudeSession(
-            id: hook?.sessionId ?? TranscriptReader.sessionId(tail) ?? "pid-\(pid)",
+            id: hook?.sessionId ?? TranscriptReader.sessionId(tail) ?? TranscriptReader.sessionId(head) ?? "pid-\(pid)",
             pid: pid,
             workingDirectory: cwd,
             repoName: Paths.repoName(from: cwd),
@@ -224,7 +241,8 @@ public actor SessionDiscovery {
         session.desktopSessionId = hook?.desktopSessionId
         session.lastHookAt = hook?.timestamp
         session.forge = slow.forge?.rawValue
-        session.awaitingPermission = StatusClassifier.awaitsPermission(status: status, hookStatus: hook?.impliedStatus, hasPendingToolUse: pending)
+        session.awaitingPermission = StatusClassifier.awaitsPermission(status: status, hookStatus: hookStatus, hasPendingToolUse: pending)
+        session.agent = agent
         // Claude Desktop sessions have no terminal: "orphaned" doesn't apply.
         if session.isDesktop { session.orphaned = false }
         return session

@@ -12,7 +12,7 @@ struct SettingsView: View {
             AppsSettings().tabItem { Label("Apps", systemImage: "square.grid.2x2") }
             NotificationSettings().tabItem { Label("Hinweise", systemImage: "bell") }
             ShortcutSettings().tabItem { Label("Tasten", systemImage: "keyboard") }
-            HookSettings().tabItem { Label("Hooks", systemImage: "link") }
+            HookSettings().tabItem { Label("Agents", systemImage: "link") }
         }
         .padding(16)
         .frame(width: 620, height: 520)
@@ -148,6 +148,10 @@ private struct WorkflowSettings: View {
                     Text("Prompt für „MR erstellen“ (P) – GitLab")
                     TextEditor(text: $store.config.createMrPrompt).frame(height: 60).font(.system(size: 11))
                 }
+                VStack(alignment: .leading) {
+                    Text("Prompt für „PR erstellen“ (P) – Forgejo/Codeberg")
+                    TextEditor(text: $store.config.createForgejoPrompt).frame(height: 60).font(.system(size: 11))
+                }
                 Stepper("Als veraltet markieren nach \(store.config.staleThresholdMinutes) min", value: $store.config.staleThresholdMinutes, in: 10...1440, step: 10)
                 Toggle("Beim Aufräumen Terminal-, Git-Client- und Browser-Tabs schließen", isOn: $store.config.cleanupCloseTabs)
             }
@@ -183,6 +187,7 @@ private struct AppsSettings: View {
                 requirement("git", "Branch-, Diff- und Worktree-Infos")
                 requirement("gh", "Pull-Request-Status (gh auth login)")
                 requirement("glab", "Merge-Request-Status (glab auth login)")
+                requirement("fj", "Forgejo/Codeberg-PRs (fj auth login – QodeNotch nutzt dessen Login)")
                 requirement("tmux", "Steuerung ohne Fokuswechsel")
                 Text("Für Terminal.app, Ghostty, Warp und Alacritty benötigt QodeNotch die Bedienungshilfen-Berechtigung (Tastatureingaben) und die Automation-Freigabe.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -298,6 +303,15 @@ private struct HookSettings: View {
 
     var body: some View {
         Form {
+            Section("Agents") {
+                agentRow(.claude, state: store.hookState, present: true, enabled: .constant(true))
+                agentRow(.codex, state: store.codexHookState, present: AgentHooks.isCodexPresent, enabled: $store.config.enableCodex)
+                agentRow(.copilot, state: store.copilotHookState, present: AgentHooks.isCopilotPresent, enabled: $store.config.enableCopilot)
+                LabeledContent("Startbefehl Codex") { TextField("codex", text: $store.config.codexCommand).frame(width: 180) }
+                LabeledContent("Startbefehl Copilot") { TextField("copilot", text: $store.config.copilotCommand).frame(width: 180) }
+                Text("Codex: Hooks in ~/.codex/hooks.json, dazu `features.hooks = true` in ~/.codex/config.toml (Backup wird angelegt). Copilot CLI: eigene Datei ~/.copilot/hooks/qodenotch.json. Copilot meldet Freigabe-Anfragen nicht direkt – sie werden erkannt, wenn ein Tool angekündigt ist und nicht startet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Claude-Code-Hooks") {
                 HStack {
                     Image(systemName: icon.0).foregroundStyle(icon.1)
@@ -321,6 +335,31 @@ private struct HookSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func agentRow(_ agent: Agent, state: HookManager.InstallState, present: Bool, enabled: Binding<Bool>) -> some View {
+        HStack {
+            Image(systemName: agent.symbol).foregroundStyle(agent.color).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(agent.label) (\(agent.vendor))")
+                Text(agentStateText(state, present: present, enabled: enabled.wrappedValue)).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if agent != .claude {
+                Toggle("", isOn: enabled).labelsHidden().toggleStyle(.switch).disabled(!present)
+            }
+        }
+    }
+
+    private func agentStateText(_ state: HookManager.InstallState, present: Bool, enabled: Bool) -> String {
+        if !present { return "Nicht gefunden (Konfigurationsordner fehlt)" }
+        if !enabled { return "Ausgeschaltet – nur Prozess- und Verlaufserkennung" }
+        switch state {
+        case .installed: return "Hooks aktiv – Status in Echtzeit"
+        case .partial: return "Hooks teilweise installiert"
+        case .notInstalled: return "Hooks nicht installiert"
+        case let .error(msg): return msg
+        }
     }
 
     private var stateText: String {

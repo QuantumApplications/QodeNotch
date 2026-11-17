@@ -86,7 +86,17 @@ public enum ModelName {
         let lower = id.lowercased()
         guard lower != "<synthetic>" else { return id }
         let families = ["opus", "sonnet", "haiku", "fable"]
-        guard let family = families.first(where: lower.contains) else { return id }
+        guard let family = families.first(where: lower.contains) else {
+            // OpenAI ("gpt-5-codex" → "GPT-5 Codex") and others: tidy up, keep the id.
+            if lower.hasPrefix("gpt-") || lower.hasPrefix("o3") || lower.hasPrefix("o4") {
+                let parts = id.split(separator: "-").map(String.init)
+                guard let first = parts.first else { return id }
+                let head = first.uppercased() + (parts.count > 1 && Double(parts[1].replacingOccurrences(of: ".", with: "")) != nil ? "-" + parts[1] : "")
+                let rest = parts.dropFirst(head.contains("-") ? 2 : 1).filter { Int($0) == nil || $0.count < 4 }.map { $0.capitalized }
+                return ([head] + rest).joined(separator: " ")
+            }
+            return id
+        }
         // Version digits after (new ids) or before (old ids) the family name.
         let parts = lower.replacingOccurrences(of: "[1m]", with: "").split(whereSeparator: { $0 == "-" || $0 == "." || $0 == "@" }).map(String.init)
         guard let idx = parts.firstIndex(of: family) else { return family.capitalized }
@@ -113,12 +123,21 @@ public enum TranscriptReader {
 
     // MARK: File access
 
+    /// Parse JSONL from Claude Code, Codex (rollout files) or Copilot CLI
+    /// (events.jsonl). Codex/Copilot lines are translated into Claude's shape.
     public static func parse(_ text: String) -> [TranscriptLine] {
-        text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { raw in
+        var converter = ForeignTranscriptConverter()
+        var out: [TranscriptLine] = []
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let data = raw.data(using: .utf8),
-                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-            return TranscriptLine(json: obj)
+                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            if let converted = converter.convert(obj) {
+                out.append(contentsOf: converted.map(TranscriptLine.init(json:)))
+            } else {
+                out.append(TranscriptLine(json: obj))
+            }
         }
+        return out
     }
 
     public static func readTail(_ path: String, lines: Int = tailLines) -> [TranscriptLine] {

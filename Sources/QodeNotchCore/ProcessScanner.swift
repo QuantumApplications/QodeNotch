@@ -45,6 +45,38 @@ public enum ProcessScanner {
         tree.values.filter { $0.basename == "claude" }.map(\.pid).sorted()
     }
 
+    /// Agent CLI for a process name, from `ps` comm alone.
+    public static func agent(forComm comm: String) -> Agent? {
+        // Desktop apps (Codex.app, Claude.app …) are not CLI sessions.
+        if comm.contains(".app/") { return nil }
+        let base = (comm.split(separator: "/").last.map(String.init) ?? comm).lowercased()
+        if base == "claude" { return .claude }
+        if base == "codex" || (base.hasPrefix("codex-") && !base.contains("app-server") && !base.contains("mcp")) { return .codex }
+        if base == "copilot" { return .copilot }
+        return nil
+    }
+
+    /// All agent CLI processes: native binaries by name, plus Node-based
+    /// installs (`node …/@github/copilot/…`) by their arguments.
+    public static func agentPids(in tree: ProcessTree) async -> [Int32: Agent] {
+        var result: [Int32: Agent] = [:]
+        for e in tree.values { if let a = agent(forComm: e.comm) { result[e.pid] = a } }
+        let nodes = tree.values.filter { $0.basename == "node" }.map(\.pid)
+        guard !nodes.isEmpty else { return result }
+        let r = await Shell.run("/bin/ps", ["-ww", "-o", "pid=,args=", "-p", nodes.map(String.init).joined(separator: ",")], timeout: 5)
+        for raw in r.stdout.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard let space = line.firstIndex(of: " "), let pid = Int32(line[..<space]) else { continue }
+            let args = line[space...]
+            if args.contains("@github/copilot") {
+                // The npm launcher may re-spawn itself: keep only the outermost Node process.
+                if let parent = tree[pid]?.ppid, result[parent] == .copilot { continue }
+                result[pid] = .copilot
+            }
+        }
+        return result
+    }
+
     /// A host-side `podman`/`docker` client attached to a container running Claude Code
     /// (airlock, devcontainers, …). Claude itself runs inside the VM, so this process
     /// stands in for it: it owns the terminal tab and receives keystrokes.

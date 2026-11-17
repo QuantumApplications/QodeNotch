@@ -36,7 +36,7 @@ struct SessionListView: View {
     }
 
     private var maxListHeight: CGFloat {
-        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 60 * store.config.scale
+        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 92 * store.config.scale
     }
 
     private func card(_ s: ClaudeSession) -> some View {

@@ -204,6 +204,7 @@ public actor LocalUsageScanner {
 
     private struct FileState {
         var offset: UInt64 = 0
+        var converter = ForeignTranscriptConverter()
         var seen = Set<String>()
         var perDay: [Date: [String: TokenUsage]] = [:]
     }
@@ -220,16 +221,22 @@ public actor LocalUsageScanner {
         var aggregate: [Date: [String: TokenUsage]] = [:]
         let projects = (try? fm.contentsOfDirectory(atPath: Paths.claudeProjectsDir)) ?? []
         var alive = Set<String>()
+        var paths: [String] = []
         for project in projects where !project.hasPrefix(".") {
             let dir = Paths.claudeProjectsDir + "/" + project
             for e in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where e.hasSuffix(".jsonl") {
-                let path = dir + "/" + e
-                guard let m = TranscriptReader.mtime(path), m >= first else { continue }
-                alive.insert(path)
-                let state = scan(path)
-                for (day, models) in state.perDay where day >= first {
-                    for (model, u) in models { aggregate[day, default: [:]][model, default: TokenUsage()] += u }
-                }
+                paths.append(dir + "/" + e)
+            }
+        }
+        // Codex (OpenAI) and Copilot CLI sessions count too.
+        paths += AgentStores.codexRollouts(days: dayCount + 1, now: now)
+        paths += AgentStores.copilotEventFiles()
+        for path in paths {
+            guard let m = TranscriptReader.mtime(path), m >= first else { continue }
+            alive.insert(path)
+            let state = scan(path)
+            for (day, models) in state.perDay where day >= first {
+                for (model, u) in models { aggregate[day, default: [:]][model, default: TokenUsage()] += u }
             }
         }
         files = files.filter { alive.contains($0.key) }
@@ -258,12 +265,14 @@ public actor LocalUsageScanner {
         for raw in complete.split(separator: 0x0A) {
             // Cheap pre-filter before JSON parsing.
             guard raw.count > 20, let obj = (try? JSONSerialization.jsonObject(with: Data(raw))) as? [String: Any] else { continue }
-            let line = TranscriptLine(json: obj)
-            guard line.type == "assistant", let usage = line.usage, let model = line.model, model != "<synthetic>",
-                  let ts = line.timestamp.flatMap(TranscriptReader.parseDate) else { continue }
-            if let id = line.messageId, !state.seen.insert(id).inserted { continue }
-            let day = calendar.startOfDay(for: ts)
-            state.perDay[day, default: [:]][model, default: TokenUsage()] += usage
+            let lines = state.converter.convert(obj).map { $0.map(TranscriptLine.init(json:)) } ?? [TranscriptLine(json: obj)]
+            for line in lines {
+                guard line.type == "assistant", let usage = line.usage, let model = line.model, model != "<synthetic>",
+                      let ts = line.timestamp.flatMap(TranscriptReader.parseDate) else { continue }
+                if let id = line.messageId, !state.seen.insert(id).inserted { continue }
+                let day = calendar.startOfDay(for: ts)
+                state.perDay[day, default: [:]][model, default: TokenUsage()] += usage
+            }
         }
         files[path] = state
         return state

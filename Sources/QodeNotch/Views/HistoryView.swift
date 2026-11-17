@@ -1,13 +1,16 @@
 import QodeNotchCore
 import SwiftUI
 
-/// All sessions Claude Code has stored, searchable, reopenable.
+/// All sessions stored by Claude Code, Codex and Copilot CLI – searchable, reopenable.
 struct HistoryView: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var layout: NotchLayout
     @State private var query = ""
+    @State private var agentFilter: Agent?
 
-    private var filtered: [PastSession] { SessionHistory.filter(store.history, query: query) }
+    private var filtered: [PastSession] {
+        SessionHistory.filter(store.history.filter { agentFilter == nil || $0.agent == agentFilter }, query: query)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -27,6 +30,14 @@ struct HistoryView: View {
                     Task { try? await SessionActions.openInClaudeDesktop(hostSessionId: nil) }
                 }
                 Spacer()
+                Picker("", selection: $agentFilter) {
+                    Text("Alle").tag(Agent?.none)
+                    ForEach(Agent.allCases) { Text($0.label).tag(Agent?.some($0)) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: 280)
             }
             NotchTextField(placeholder: "Suchen nach Titel, Pfad, Branch …", text: $query) {
                 if let first = filtered.first { store.resume(first) }
@@ -53,7 +64,7 @@ struct HistoryView: View {
     }
 
     private var maxListHeight: CGFloat {
-        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 100 * store.config.scale
+        store.config.scaledMaxHeight - max(layout.geometry.notchHeight, 28) - 160 * store.config.scale
     }
 
     private var strategyText: String {
@@ -74,6 +85,7 @@ private struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if let live { StatusOrb(status: live.status, size: 7) }
+                    Image(systemName: past.agent.symbol).scaledFont(size: 9).foregroundStyle(past.agent.color).help(past.agent.label)
                     Text(past.title).scaledFont(size: 11.5, weight: .semibold).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(past.lastActivity.relative).scaledFont(size: 10).foregroundStyle(Color.primary.opacity(0.4))
@@ -115,7 +127,8 @@ private struct HistoryRow: View {
             }
             Button("Session-ID kopieren") { copy(past.id) }
             Button("Resume-Befehl kopieren") {
-                copy("cd \(Shell.quote(past.workingDirectory ?? "~")) && claude --resume \(past.id)")
+                let cmd = SessionResumer.command(for: past, config: store.config) ?? "claude --resume \(past.id)"
+                copy("cd \(Shell.quote(past.workingDirectory ?? "~")) && \(cmd)")
             }
         }
         .help(past.summary ?? past.title)

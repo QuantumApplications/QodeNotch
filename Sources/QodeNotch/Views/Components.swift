@@ -364,3 +364,28 @@ extension ClaudeSession {
         return nil
     }
 }
+
+extension Agent {
+    var color: Color {
+        switch self {
+        case .claude: return Color(red: 0.85, green: 0.47, blue: 0.34)
+        case .codex: return Color(red: 0.06, green: 0.64, blue: 0.5)
+        case .copilot: return Color(red: 0.55, green: 0.45, blue: 0.95)
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .claude: return "asterisk"
+        case .codex: return "circle.hexagongrid"
+        case .copilot: return "airplane"
+        }
+    }
+}
+
+struct AgentChip: View {
+    var agent: Agent
+    var body: some View {
+        Chip(text: agent.label, symbol: agent.symbol, color: agent.color, help: "\(agent.label) (\(agent.vendor))")
+    }
+}

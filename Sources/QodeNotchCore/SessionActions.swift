@@ -116,6 +116,13 @@ public enum SessionActions {
         try await TerminalController.sendKeystroke(try await terminal(for: session), .text(String(option)))
     }
 
+    /// "Always allow" differs per CLI: Claude Code / Copilot list it as option 2,
+    /// Codex uses the "a" shortcut.
+    public static func alwaysAllow(_ session: ClaudeSession) async throws {
+        let key: Keystroke = session.agent == .codex ? .text("a") : .text("2")
+        try await TerminalController.sendKeystroke(try await terminal(for: session), key)
+    }
+
     public static func sendMessage(_ session: ClaudeSession, _ text: String) async throws {
         try await TerminalController.sendText(try await terminal(for: session), text)
     }
@@ -197,8 +204,10 @@ public enum SessionActions {
         public var baseBranch: String?
         public var prompt: String?
         public var tmuxSession: String?
+        public var agent: Agent = .claude
 
-        public init(repoPath: String, branchName: String? = nil, baseBranch: String? = nil, prompt: String? = nil, tmuxSession: String? = nil) {
+        public init(repoPath: String, branchName: String? = nil, baseBranch: String? = nil, prompt: String? = nil, tmuxSession: String? = nil, agent: Agent = .claude) {
+            self.agent = agent
             self.repoPath = repoPath
             self.branchName = branchName
             self.baseBranch = baseBranch
@@ -223,8 +232,15 @@ public enum SessionActions {
         }
         try await TerminalController.createSession(.init(
             terminal: config.terminalApp, openIn: config.terminalOpenIn, useTmux: config.terminalUseTmux,
-            tmuxSession: tmuxName, cwd: target, prompt: req.prompt, initialCommand: config.initialCommand))
+            tmuxSession: tmuxName, cwd: target, prompt: req.prompt, initialCommand: startCommand(agent: req.agent, hasPrompt: req.prompt != nil, config: config)))
         return target
+    }
+
+    /// Command line that starts an agent; the prompt is appended as last argument.
+    public static func startCommand(agent: Agent, hasPrompt: Bool, config: AppConfig) -> String {
+        let base = config.command(for: agent)
+        // Copilot CLI takes an initial prompt via -i (interactive) – plain arguments are not prompts.
+        return agent == .copilot && hasPrompt ? base + " -i" : base
     }
 
     /// Find the main repo for a worktree, even if the worktree folder is gone.

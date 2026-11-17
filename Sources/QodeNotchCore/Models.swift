@@ -1,5 +1,37 @@
 import Foundation
 
+/// The coding agent running a session.
+public enum Agent: String, Codable, CaseIterable, Sendable, Identifiable {
+    case claude, codex, copilot
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .claude: return "Claude Code"
+        case .codex: return "Codex"
+        case .copilot: return "Copilot"
+        }
+    }
+
+    public var vendor: String {
+        switch self {
+        case .claude: return "Anthropic"
+        case .codex: return "OpenAI"
+        case .copilot: return "GitHub"
+        }
+    }
+
+    /// Default command that starts the agent's CLI.
+    public var defaultCommand: String {
+        switch self {
+        case .claude: return "claude"
+        case .codex: return "codex"
+        case .copilot: return "copilot"
+        }
+    }
+}
+
 /// High-level state of a Claude Code session.
 public enum SessionStatus: String, Codable, CaseIterable, Sendable {
     case working
@@ -154,7 +186,10 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
     public var lastHookAt: Date?
     /// "github" or "gitlab" – where pull/merge requests for this repo live.
     public var forge: String?
+    /// Which CLI runs this session.
+    public var agent: Agent = .claude
     public var isGitLab: Bool { forge == "gitlab" }
+    public var isForgejo: Bool { forge == "forgejo" }
 
     public var isDesktop: Bool { desktopSessionId != nil }
     /// Keystrokes can only reach sessions that live in a terminal.

@@ -60,7 +60,7 @@ public actor PullRequestService {
     private var forgeCache: [String: Forge] = [:]
     private var preference: ForgePreference = .auto
 
-    public enum Forge: String, Sendable { case github, gitlab }
+    public enum Forge: String, Sendable { case github, gitlab, forgejo }
 
     public func setPreference(_ p: ForgePreference) {
         guard p != preference else { return }
@@ -74,6 +74,7 @@ public actor PullRequestService {
         switch preference {
         case .github: return .github
         case .gitlab: return .gitlab
+        case .forgejo: return .forgejo
         case .auto: break
         }
         if let f = forgeCache[cwd] { return f }
@@ -98,6 +99,9 @@ public actor PullRequestService {
         guard let host = remoteHost(remote) else { return .github }
         if host.contains("github") { return .github }
         if host.contains("gitlab") { return .gitlab }
+        if host.contains("codeberg") || host.contains("forgejo") || host.contains("gitea") || FjCredentials.knows(host: host) {
+            return .forgejo
+        }
         // Self-hosted GitLab without "gitlab" in the name: ask glab whether it knows the host.
         if Shell.which("glab") != nil, await Shell.run("glab", ["auth", "status", "--hostname", host], timeout: 5).ok {
             return .gitlab
@@ -106,6 +110,8 @@ public actor PullRequestService {
     }
 
     public static func isMergeRequestURL(_ url: String) -> Bool { url.contains("/merge_requests/") }
+    /// Forgejo/Gitea PR URLs use `/pulls/<n>` (GitHub: `/pull/<n>`).
+    public static func isForgejoURL(_ url: String) -> Bool { url.contains("/pulls/") }
 
     public func prUrl(cwd: String, branch: String) async -> String? {
         let key = cwd + "::" + branch
@@ -120,6 +126,13 @@ public actor PullRequestService {
         case .gitlab:
             let r = await Shell.run("glab", ["mr", "list", "--source-branch", branch, "--all", "--per-page", "5", "--output", "json"], cwd: cwd, timeout: 10)
             value = r.ok ? Self.parseGitLabMRList(r.stdout) : nil
+        case .forgejo:
+            let remote = await GitInfo.git(["remote", "get-url", "origin"], cwd: cwd)
+            if let repo = ForgejoAPI.repo(fromRemote: remote) {
+                value = await ForgejoAPI.prURL(repo: repo, branch: branch)
+            } else {
+                value = nil
+            }
         }
         urlCache[key] = (value, Date())
         return value
@@ -138,6 +151,8 @@ public actor PullRequestService {
         let result: PrStatus?
         if Self.isMergeRequestURL(url) {
             result = await gitLabStatus(url: url, cwd: cwd)
+        } else if Self.isForgejoURL(url) {
+            result = await ForgejoAPI.status(url: url)
         } else {
             async let viewT = Shell.run("gh", ["pr", "view", url, "--json", "url,state,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus"], cwd: cwd, timeout: 10)
             async let threadsT = reviewThreads(url: url, cwd: cwd)
