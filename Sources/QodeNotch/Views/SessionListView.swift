@@ -53,10 +53,10 @@ private struct GroupHeader: View {
             Image(systemName: "folder").font(.system(size: 9))
             Text(group.repoName).font(.system(size: 10, weight: .semibold))
             Text(Paths.abbreviateHome(group.repoPath)).font(.system(size: 9)).lineLimit(1).truncationMode(.middle)
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(Color.primary.opacity(0.3))
             Spacer()
         }
-        .foregroundStyle(.white.opacity(0.5))
+        .foregroundStyle(Color.primary.opacity(0.5))
         .padding(.top, 4)
         .padding(.horizontal, 4)
     }
@@ -67,11 +67,14 @@ private struct EmptyState: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "terminal").font(.system(size: 22)).foregroundStyle(.white.opacity(0.35))
-            Text("Keine laufenden Claude-Sessions").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
+            Image(systemName: "terminal").font(.system(size: 22)).foregroundStyle(Color.primary.opacity(0.35))
+            Text("Keine laufenden Claude-Sessions").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.7))
             Text("Starte `claude` in einem Terminal oder lege hier eine neue Session an.")
-                .font(.system(size: 11)).foregroundStyle(.white.opacity(0.45)).multilineTextAlignment(.center)
-            PillButton(title: "Neue Session", symbol: "plus", color: SessionStatus.working.color) { store.route = .newSession }
+                .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.45)).multilineTextAlignment(.center)
+            HStack(spacing: 8) {
+                PillButton(title: "Neue Session", symbol: "plus", color: SessionStatus.working.color) { store.route = .newSession }
+                PillButton(title: "Alle Sessions", symbol: "clock.arrow.circlepath", color: SessionStatus.working.color, filled: false) { store.route = .history }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
@@ -86,7 +89,7 @@ private struct HookWarning: View {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Claude-Code-Hooks nicht vollständig installiert").font(.system(size: 11, weight: .semibold))
-                Text(detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)).lineLimit(2)
+                Text(detail).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(2)
             }
             Spacer()
             PillButton(title: "Installieren", color: .yellow) { store.reinstallHooks() }
@@ -110,10 +113,11 @@ struct KeyboardHints: View {
             hint("↩", "Terminal")
             hint("E G F P", "Editor/Git/Finder/PR")
             hint("D", "Details")
+            hint("H", "alle Sessions")
             hint("esc", "schließen")
         }
         .font(.system(size: 9))
-        .foregroundStyle(.white.opacity(0.4))
+        .foregroundStyle(Color.primary.opacity(0.4))
         .frame(maxWidth: .infinity)
     }
 
@@ -121,7 +125,7 @@ struct KeyboardHints: View {
         HStack(spacing: 3) {
             Text(key).font(.system(size: 9, weight: .bold, design: .monospaced))
                 .padding(.horizontal, 3)
-                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
+                .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
             Text(label)
         }
     }

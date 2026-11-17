@@ -5,12 +5,44 @@ public struct EditorOption: Identifiable, Sendable, Hashable {
     public var label: String
     public var command: String
     public var appName: String
+    /// Other bundle names the same editor may be installed under.
+    public var alternateAppNames: [String] = []
 }
 
 public struct AppOption: Identifiable, Sendable, Hashable {
     public var id: String
     public var label: String
     public var appName: String
+}
+
+public enum Theme: String, Codable, CaseIterable, Sendable {
+    case dark, light, system
+
+    public var label: String {
+        switch self {
+        case .dark: return "Dunkel"
+        case .light: return "Hell"
+        case .system: return "Wie System"
+        }
+    }
+}
+
+/// How a past session is reopened.
+public enum ResumeStrategy: String, Codable, CaseIterable, Sendable {
+    /// airlock if it is installed, otherwise `claude --resume`.
+    case auto
+    /// `cd <dir> && claude --resume <session-id>`.
+    case resume
+    /// `cd <dir> && claude` – airlock continues the folder's last session by itself.
+    case airlock
+
+    public var label: String {
+        switch self {
+        case .auto: return "Automatisch"
+        case .resume: return "claude --resume <id>"
+        case .airlock: return "airlock (Ordner öffnen, setzt automatisch fort)"
+        }
+    }
 }
 
 public enum TmuxMode: String, Codable, CaseIterable, Sendable {
@@ -57,6 +89,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var showFinishedSessions: Bool = false
     public var showKeyboardHints: Bool = true
     public var groupByRepo: Bool = true
+    public var theme: Theme = .dark
+    public var resumeStrategy: ResumeStrategy = .auto
     public var launchAtLogin: Bool = false
 
     // Global hotkeys
@@ -79,7 +113,10 @@ public struct AppConfig: Codable, Equatable, Sendable {
         .init(id: "xcode", label: "Xcode", command: "xed", appName: "Xcode"),
         .init(id: "sublime", label: "Sublime Text", command: "subl", appName: "Sublime Text"),
         .init(id: "webstorm", label: "WebStorm", command: "webstorm", appName: "WebStorm"),
-        .init(id: "intellij", label: "IntelliJ IDEA", command: "idea", appName: "IntelliJ IDEA"),
+        .init(id: "intellij", label: "IntelliJ IDEA", command: "idea", appName: "IntelliJ IDEA",
+              alternateAppNames: ["IntelliJ IDEA CE", "IntelliJ IDEA Ultimate"]),
+        .init(id: "pycharm", label: "PyCharm", command: "pycharm", appName: "PyCharm",
+              alternateAppNames: ["PyCharm CE", "PyCharm Professional Edition", "PyCharm Community Edition"]),
         .init(id: "nova", label: "Nova", command: "nova", appName: "Nova"),
     ]
 
@@ -147,6 +184,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         showFinishedSessions = d(.showFinishedSessions, showFinishedSessions)
         showKeyboardHints = d(.showKeyboardHints, showKeyboardHints)
         groupByRepo = d(.groupByRepo, groupByRepo)
+        theme = d(.theme, theme)
+        resumeStrategy = d(.resumeStrategy, resumeStrategy)
         launchAtLogin = d(.launchAtLogin, launchAtLogin)
         hotkeyToggle = d(.hotkeyToggle, hotkeyToggle)
         hotkeyApproveDeny = d(.hotkeyApproveDeny, hotkeyApproveDeny)

@@ -103,7 +103,7 @@ struct StatusPill: View {
 struct Chip: View {
     var text: String
     var symbol: String?
-    var color: Color = .white.opacity(0.6)
+    var color: Color = Color.primary.opacity(0.6)
 
     var body: some View {
         HStack(spacing: 3) {
@@ -123,11 +123,11 @@ struct GitStatsView: View {
     var body: some View {
         HStack(spacing: 5) {
             if git.isClean {
-                Text("sauber").foregroundStyle(.white.opacity(0.4))
+                Text("sauber").foregroundStyle(Color.primary.opacity(0.4))
             } else {
                 if git.additions > 0 { Text("+\(git.additions)").foregroundStyle(.green) }
                 if git.deletions > 0 { Text("−\(git.deletions)").foregroundStyle(.red.opacity(0.9)) }
-                Text("\(git.changedFiles + git.untrackedFiles) Dat.").foregroundStyle(.white.opacity(0.45))
+                Text("\(git.changedFiles + git.untrackedFiles) Dat.").foregroundStyle(Color.primary.opacity(0.45))
             }
         }
         .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -162,7 +162,7 @@ struct PrBadge: View {
     }
 
     private var style: (Color, String) {
-        guard let s = status else { return (.white.opacity(0.6), "arrow.triangle.pull") }
+        guard let s = status else { return (Color.primary.opacity(0.6), "arrow.triangle.pull") }
         if s.state == "MERGED" { return (.purple, "arrow.triangle.merge") }
         if s.state == "CLOSED" { return (.gray, "xmark.circle") }
         if s.reviewDecision == "CHANGES_REQUESTED" { return (.orange, "exclamationmark.bubble") }
@@ -170,7 +170,7 @@ struct PrBadge: View {
         case .failing: return (.red, "xmark")
         case .pending: return (.yellow, "clock")
         case .passing: return (s.reviewDecision == "APPROVED" ? .green : .mint, "checkmark")
-        case .none: return (.white.opacity(0.7), "arrow.triangle.pull")
+        case .none: return (Color.primary.opacity(0.7), "arrow.triangle.pull")
         }
     }
 
@@ -190,7 +190,7 @@ struct IconButton: View {
     var symbol: String
     var help: String
     var shortcut: String?
-    var tint: Color = .white
+    var tint: Color = Color.primary
     var action: () -> Void
 
     @State private var hovering = false
@@ -201,7 +201,7 @@ struct IconButton: View {
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: 24, height: 22)
                 .foregroundStyle(tint.opacity(hovering ? 1 : 0.7))
-                .background(Color.white.opacity(hovering ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 6))
+                .background(Color.primary.opacity(hovering ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -251,8 +251,8 @@ struct NotchTextField: View {
             .font(.system(size: 12))
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(focused ? 0.25 : 0.08)))
+            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(focused ? 0.25 : 0.08)))
             .focused($focused)
             .onSubmit(onSubmit)
             .onChange(of: focused) { _, f in layout.isEditing = f }

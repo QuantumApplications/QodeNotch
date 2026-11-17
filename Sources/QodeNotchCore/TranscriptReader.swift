@@ -4,6 +4,9 @@ import Foundation
 public struct TranscriptLine {
     public var type: String
     public var sessionId: String?
+    public var cwd: String?
+    /// Text of a `{"type":"summary"}` line (session title written by Claude Code).
+    public var summary: String?
     public var gitBranch: String?
     public var timestamp: String?
     public var role: String?
@@ -15,6 +18,8 @@ public struct TranscriptLine {
     public init(json: [String: Any]) {
         type = json["type"] as? String ?? ""
         sessionId = json["sessionId"] as? String
+        cwd = json["cwd"] as? String
+        summary = json["summary"] as? String
         gitBranch = json["gitBranch"] as? String
         timestamp = json["timestamp"] as? String
         isMeta = json["isMeta"] as? Bool ?? false

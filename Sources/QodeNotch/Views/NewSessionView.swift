@@ -50,12 +50,12 @@ struct NewSessionView: View {
                                     HStack {
                                         Image(systemName: "folder").font(.system(size: 10))
                                         Text(repo.name).font(.system(size: 11, weight: .medium))
-                                        Text(Paths.abbreviateHome(repo.path)).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4)).lineLimit(1).truncationMode(.middle)
+                                        Text(Paths.abbreviateHome(repo.path)).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4)).lineLimit(1).truncationMode(.middle)
                                         Spacer()
                                     }
                                     .padding(.vertical, 3)
                                     .padding(.horizontal, 6)
-                                    .background(repo.path == repoPath ? Color.white.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                                    .background(repo.path == repoPath ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 5))
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -64,7 +64,7 @@ struct NewSessionView: View {
                     }
                 } else if repos.isEmpty && store.config.codeDirectories.isEmpty {
                     Text("Tipp: Code-Verzeichnisse in den Einstellungen hinterlegen, um Repos hier aufzulisten.")
-                        .font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                        .font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
                 }
             }
 
@@ -89,7 +89,7 @@ struct NewSessionView: View {
                         Text("Ungültiger Branch-Name").font(.system(size: 10)).foregroundStyle(.red)
                     } else if !branch.isEmpty && !repoPath.isEmpty {
                         Text("→ \(Paths.abbreviateHome(SessionActions.worktreePath(repo: repoPath, branch: branch)))")
-                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
+                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(Color.primary.opacity(0.4))
                     }
                 }
             }
@@ -113,12 +113,12 @@ struct NewSessionView: View {
                     .scrollContentBackground(.hidden)
                     .padding(4)
                     .frame(height: 64)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             }
 
             HStack {
                 Text("\(store.config.terminalApp.displayName) · \(store.config.terminalOpenIn == .tab ? "neuer Tab" : "neues Fenster")\(store.config.terminalUseTmux ? " · tmux" : "")")
-                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+                    .font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
                 Spacer()
                 PillButton(title: creating ? "Starte …" : "Session starten", symbol: "play.fill", color: SessionStatus.working.color) { create() }
                     .disabled(!canCreate || creating)
@@ -139,7 +139,7 @@ struct NewSessionView: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.4))
+            Text(title.uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(Color.primary.opacity(0.4))
             content()
         }
     }

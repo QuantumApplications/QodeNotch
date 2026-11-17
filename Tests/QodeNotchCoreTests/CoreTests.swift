@@ -336,3 +336,68 @@ final class MiscTests: XCTestCase {
         XCTAssertFalse(r.ok)
     }
 }
+
+final class HistoryTests: XCTestCase {
+    private func makeHome() throws -> String {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        return home
+    }
+
+    func testListsStoredSessionsNewestFirst() async throws {
+        let home = try makeHome()
+        setenv("HOME", home, 1)
+        defer { unsetenv("HOME") }
+        let project = home + "/code/app"
+        try FileManager.default.createDirectory(atPath: project, withIntermediateDirectories: true)
+        let dir = Paths.claudeProjectsDir + "/" + Paths.escapedProjectNames(for: project)[0]
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        let old = #"{"type":"user","sessionId":"aaaa-1","cwd":"\#(project)","gitBranch":"main","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Add login page\nwith OAuth"}}"#
+        let new = #"""
+        {"type":"summary","summary":"Refactor database layer","leafUuid":"x"}
+        {"type":"user","sessionId":"bbbb-2","cwd":"\#(project)","gitBranch":"feat/db","message":{"role":"user","content":"Refactor the db"}}
+        """#
+        let empty = #"{"type":"system","sessionId":"cccc-3","cwd":"\#(project)"}"#
+        try old.write(toFile: dir + "/aaaa-1.jsonl", atomically: true, encoding: .utf8)
+        try new.write(toFile: dir + "/bbbb-2.jsonl", atomically: true, encoding: .utf8)
+        try empty.write(toFile: dir + "/cccc-3.jsonl", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: dir + "/aaaa-1.jsonl")
+
+        let list = await SessionHistory().list()
+        XCTAssertEqual(list.map(\.id), ["bbbb-2", "aaaa-1"])
+        XCTAssertEqual(list[0].title, "Refactor database layer")
+        XCTAssertEqual(list[0].branch, "feat/db")
+        XCTAssertEqual(list[1].title, "Add login page")
+        XCTAssertEqual(list[1].summary, "with OAuth")
+        XCTAssertEqual(list[1].workingDirectory, project)
+        XCTAssertTrue(list[1].directoryExists)
+
+        XCTAssertEqual(SessionHistory.filter(list, query: "oauth").map(\.id), ["aaaa-1"])
+        XCTAssertEqual(SessionHistory.filter(list, query: "feat/db refactor").map(\.id), ["bbbb-2"])
+        XCTAssertEqual(SessionHistory.filter(list, query: "").count, 2)
+    }
+
+    func testResumeCommands() {
+        let past = PastSession(id: "1b2c-3d", transcriptPath: "/t", workingDirectory: "/x", title: "t", summary: nil,
+                               branch: nil, lastActivity: Date(), startedAt: nil)
+        var config = AppConfig()
+        config.resumeStrategy = .resume
+        XCTAssertEqual(SessionResumer.command(for: past, config: config), "claude --resume 1b2c-3d")
+        config.resumeStrategy = .airlock
+        XCTAssertEqual(SessionResumer.command(for: past, config: config), "claude")
+
+        var evil = past
+        evil.id = "x; rm -rf ~"
+        config.resumeStrategy = .resume
+        XCTAssertNil(SessionResumer.command(for: evil, config: config))
+    }
+
+    func testPyCharmEditorOption() throws {
+        let c = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"editor":"pycharm","theme":"light"}"#.utf8))
+        XCTAssertEqual(c.editorOption?.command, "pycharm")
+        XCTAssertTrue(c.editorOption?.alternateAppNames.contains("PyCharm CE") ?? false)
+        XCTAssertEqual(c.theme, .light)
+        XCTAssertEqual(c.resumeStrategy, .auto)
+    }
+}

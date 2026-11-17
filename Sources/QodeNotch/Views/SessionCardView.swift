@@ -35,11 +35,11 @@ struct SessionCardView: View {
         .padding(9)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(isSelected ? 0.09 : (hovering ? 0.06 : 0.035)))
+                .fill(Color.primary.opacity(isSelected ? 0.09 : (hovering ? 0.06 : 0.035)))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(s.status == .waiting ? SessionStatus.waiting.color.opacity(0.55) : Color.white.opacity(isSelected ? 0.14 : 0), lineWidth: 1)
+                .stroke(s.status == .waiting ? SessionStatus.waiting.color.opacity(0.55) : Color.primary.opacity(isSelected ? 0.14 : 0), lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onHover { hovering = $0 }
@@ -58,8 +58,8 @@ struct SessionCardView: View {
                 Text("\(index)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .frame(width: 14, height: 14)
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
+                    .foregroundStyle(Color.primary.opacity(0.6))
             }
             StatusOrb(status: s.status, size: 8)
             Text(s.displayTitle)
@@ -71,14 +71,14 @@ struct SessionCardView: View {
             }
             Spacer(minLength: 4)
             StatusPill(status: s.status)
-            Text(s.lastActivity.relative).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+            Text(s.lastActivity.relative).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.4))
         }
     }
 
     private var metaRow: some View {
         HStack(spacing: 5) {
             if s.displayTitle != s.repoName {
-                Text(s.repoName).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Text(s.repoName).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.primary.opacity(0.55)).lineLimit(1)
             }
             if let branch = s.branch {
                 Chip(text: branch, symbol: "arrow.triangle.branch")
@@ -89,7 +89,7 @@ struct SessionCardView: View {
             if let url = s.prUrl { PrBadge(url: url, status: store.prStatuses[url]) }
             Spacer(minLength: 0)
             if s.orphaned { Chip(text: s.tmuxSession != nil ? "tmux getrennt" : "verwaist", symbol: "link.badge.plus", color: .orange) }
-            if let term = s.terminalName { Text(term).font(.system(size: 9)).foregroundStyle(.white.opacity(0.3)).lineLimit(1) }
+            if let term = s.terminalName { Text(term).font(.system(size: 9)).foregroundStyle(Color.primary.opacity(0.3)).lineLimit(1) }
         }
     }
 
@@ -100,18 +100,18 @@ struct SessionCardView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "wrench.and.screwdriver").font(.system(size: 9))
                     Text(tool.name).font(.system(size: 10, weight: .bold))
-                    if let d = tool.description, d != tool.input { Text(d).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)).lineLimit(1) }
+                    if let d = tool.description, d != tool.input { Text(d).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1) }
                 }
                 .foregroundStyle(SessionStatus.waiting.color)
                 if let input = tool.input {
                     Text(input)
                         .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Color.primary.opacity(0.85))
                         .lineLimit(isSelected ? 6 : 2)
                         .textSelection(.enabled)
                         .padding(6)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
                 }
                 ForEach(tool.warnings, id: \.self) { w in
                     Label(w, systemImage: "exclamationmark.triangle.fill")
@@ -123,11 +123,11 @@ struct SessionCardView: View {
             HStack(alignment: .top, spacing: 5) {
                 Image(systemName: s.preview.assistantIsNewer ? "sparkle" : "person.fill")
                     .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Color.primary.opacity(0.35))
                     .padding(.top, 2)
                 Text(text)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Color.primary.opacity(0.65))
                     .lineLimit(isSelected ? 4 : 2)
             }
             if s.status == .working, let tool = s.preview.lastTools.last {
@@ -139,7 +139,7 @@ struct SessionCardView: View {
                 .foregroundStyle(SessionStatus.working.color.opacity(0.9))
             }
         } else if let d = s.taskSummary?.description, isSelected {
-            Text(d).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(3)
+            Text(d).font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(3)
         }
     }
 
@@ -188,13 +188,13 @@ struct SessionCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Worktree aufräumen?").font(.system(size: 11, weight: .bold))
             Text("Beendet die Session, entfernt \(Paths.abbreviateHome(s.workingDirectory)) (auch ungespeicherte Änderungen) und löscht den lokalen Branch \(s.branch ?? "").")
-                .font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.6))
             HStack {
                 PillButton(title: "Endgültig aufräumen", symbol: "trash", color: .red) {
                     confirmCleanup = false
                     store.cleanup(s)
                 }
-                PillButton(title: "Abbrechen", color: .white, filled: false) { confirmCleanup = false }
+                PillButton(title: "Abbrechen", color: Color.primary, filled: false) { confirmCleanup = false }
             }
         }
         .padding(8)

@@ -5,6 +5,8 @@ struct NotchRootView: View {
     let controller: NotchPanelController
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var layout: NotchLayout
+    /// Follows the system appearance (the panel itself has no fixed appearance).
+    @Environment(\.colorScheme) private var systemScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,7 +14,16 @@ struct NotchRootView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .preferredColorScheme(.dark)
+    }
+
+    /// Color scheme of the expanded panel. The collapsed notch always stays
+    /// dark so it blends into the hardware notch.
+    private var expandedScheme: ColorScheme {
+        switch store.config.theme {
+        case .dark: return .dark
+        case .light: return .light
+        case .system: return systemScheme
+        }
     }
 
     @ViewBuilder
@@ -20,13 +31,16 @@ struct NotchRootView: View {
         let expanded = store.isExpanded
         let collapsed = layout.collapsedSize(hasSessions: !store.liveSessions.isEmpty)
         let hoverGrow: CGFloat = (!expanded && layout.isHovering) ? 8 : 0
+        let light = expanded && expandedScheme == .light
 
         ZStack(alignment: .top) {
             if expanded {
                 ExpandedView(controller: controller)
+                    .environment(\.colorScheme, expandedScheme)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             } else {
                 CollapsedView()
+                    .environment(\.colorScheme, .dark)
                     .frame(width: collapsed.width + hoverGrow, height: collapsed.height)
                     .transition(.opacity)
             }
@@ -34,14 +48,18 @@ struct NotchRootView: View {
         .frame(width: expanded ? CGFloat(store.config.expandedWidth) : collapsed.width + hoverGrow)
         .background(
             NotchShape(topRadius: expanded ? 10 : 6, bottomRadius: expanded ? 22 : 10)
-                .fill(Color.black)
-                .shadow(color: .black.opacity(expanded ? 0.55 : 0), radius: 14, y: 6)
+                .fill(light ? Color(white: 0.965) : Color.black)
+        )
+        .overlay(
+            NotchShape(topRadius: 10, bottomRadius: 22)
+                .stroke(Color.black.opacity(light ? 0.12 : 0), lineWidth: 1)
         )
         .clipShape(NotchShape(topRadius: expanded ? 10 : 6, bottomRadius: expanded ? 22 : 10))
         .measureHeight { h in
             if expanded, abs(layout.expandedContentHeight - h) > 0.5 { layout.expandedContentHeight = h }
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.82), value: expanded)
+        .animation(.easeInOut(duration: 0.25), value: expandedScheme)
         .animation(.easeOut(duration: 0.15), value: layout.isHovering)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store.liveSessions.isEmpty)
     }
@@ -63,7 +81,7 @@ struct CollapsedView: View {
                     if let s = live.first(where: { $0.status == .waiting }) ?? live.first {
                         Text(s.repoName)
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .foregroundStyle(Color.primary.opacity(0.75))
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -85,7 +103,7 @@ struct CollapsedView: View {
                     Text("\(live.count)").font(.system(size: 11, weight: .bold, design: .rounded))
                 }
             }
-            .foregroundStyle(store.waitingCount > 0 ? SessionStatus.waiting.color : .white.opacity(0.8))
+            .foregroundStyle(store.waitingCount > 0 ? SessionStatus.waiting.color : Color.primary.opacity(0.8))
             .padding(.trailing, 14)
             .frame(width: NotchLayout.wingWidth + 10, alignment: .trailing)
         }
@@ -117,6 +135,8 @@ struct ExpandedView: View {
                     }
                 case .newSession:
                     NewSessionView()
+                case .history:
+                    HistoryView()
                 }
             }
             .padding(.horizontal, 12)
@@ -125,10 +145,10 @@ struct ExpandedView: View {
             if let toast = store.toast {
                 Text(toast.text)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(toast.isError ? Color.red : Color.white.opacity(0.85))
+                    .foregroundStyle(toast.isError ? Color.red : Color.primary.opacity(0.85))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background((toast.isError ? Color.red : Color.white).opacity(0.12), in: Capsule())
+                    .background((toast.isError ? Color.red : Color.primary).opacity(0.12), in: Capsule())
                     .padding(.bottom, 10)
                     .transition(.opacity)
             }
@@ -143,20 +163,21 @@ struct ExpandedView: View {
             HStack(spacing: 6) {
                 StatusOrb(status: store.aggregateStatus, size: 8)
                 Text("QodeNotch").font(.system(size: 12, weight: .bold))
-                Text(summary).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                Text(summary).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.5)).lineLimit(1)
             }
             .padding(.leading, 8)
             Spacer(minLength: layout.geometry.hasNotch ? layout.geometry.notchWidth : 12)
             HStack(spacing: 4) {
                 IconButton(symbol: "plus", help: "Neue Session", shortcut: "N") { store.route = .newSession }
+                IconButton(symbol: "clock.arrow.circlepath", help: "Alle Sessions", shortcut: "H") { store.route = .history }
                 IconButton(symbol: "arrow.clockwise", help: "Aktualisieren", shortcut: "R") { store.refreshNow() }
                 IconButton(symbol: store.isPinned ? "pin.fill" : "pin", help: "Angeheftet lassen",
-                           tint: store.isPinned ? SessionStatus.waiting.color : .white) { store.isPinned.toggle() }
+                           tint: store.isPinned ? SessionStatus.waiting.color : Color.primary) { store.isPinned.toggle() }
                 IconButton(symbol: "gearshape", help: "Einstellungen") { AppDelegate.shared?.openSettings() }
             }
             .padding(.trailing, 4)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Color.primary)
     }
 
     private var summary: String {

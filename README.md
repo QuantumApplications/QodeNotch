@@ -16,6 +16,8 @@ Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-S
 | **Git & PRs** | Branch, geänderte Dateien, +/- Zeilen, Worktree-Erkennung, offener PR über `gh` mit CI-Checks, Review-Status, offenen Threads, Merge-Konflikten, merged/closed. |
 | **Aktionen** | Erlauben / Immer erlauben / Ablehnen, Antwort senden, zum Terminal-Tab springen, Editor, Git-Client, Finder, PR öffnen oder „PR erstellen“-Prompt senden, Session beenden, Titel/Beschreibung überschreiben. |
 | **Neue Sessions** | Repo aus Code-Verzeichnissen wählen (oder Ordner), optional neuen Git-Worktree `<repo>-<branch>` von einem Basisbranch anlegen, Start-Prompt, optional in tmux. |
+| **Alle Sessions** | Verlauf aller in `~/.claude/projects` gespeicherten Sessions (Titel, Repo, Pfad, Branch, Zeit), durchsuchbar, Öffnen per Klick/Doppelklick oder `H`. Normal per `claude --resume <id>`; mit airlock wird in den Ordner gewechselt und `claude` gestartet – airlock setzt die letzte Session automatisch fort. Laufende Sessions werden stattdessen im Terminal fokussiert. |
+| **Erscheinungsbild** | Dunkles oder helles Theme oder wie das System; die eingeklappte Notch bleibt immer schwarz. |
 | **Aufräumen** | Worktree-Session beenden, Worktree entfernen, lokalen Branch löschen, optional zugehörige Terminal-/Git-Client-/Browser-Tabs schließen (zweistufige Bestätigung). |
 | **Benachrichtigungen** | Mitteilungen und Töne pro Ereignis (wartet / fertig / Fehler), Klick springt ins Terminal. |
 | **Verwaist** | Sessions, deren Terminal geschlossen wurde oder deren tmux-Session getrennt ist, werden markiert; tmux-Sessions lassen sich wieder anhängen. |
@@ -42,7 +44,7 @@ Läuft Claude Code in einem Container – z. B. mit [airlock](https://github.com
 
 Global: **⌘⇧I** Notch öffnen/schließen, optional **⌘⇧A / ⌘⇧D** erste wartende Session erlauben/ablehnen.
 
-In der geöffneten Notch (nach Klick hinein bzw. via ⌘⇧I): `1–9` wählen · `⇥`/`↑↓` wechseln · `A`/`X` erlauben/ablehnen · `↩` Terminal · `E` Editor · `G` Git-Client · `F` Finder · `P` PR · `D`/`→` Details · `N` neue Session · `R` aktualisieren · `esc` zurück/schließen.
+In der geöffneten Notch (nach Klick hinein bzw. via ⌘⇧I): `1–9` wählen · `⇥`/`↑↓` wechseln · `A`/`X` erlauben/ablehnen · `↩` Terminal · `E` Editor · `G` Git-Client · `F` Finder · `P` PR · `D`/`→` Details · `N` neue Session · `H` alle Sessions · `R` aktualisieren · `esc` zurück/schließen.
 
 ## Installation
 

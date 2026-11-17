@@ -25,6 +25,9 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             Section("Anzeige") {
+                Picker("Erscheinungsbild", selection: $store.config.theme) {
+                    ForEach(Theme.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
                 Picker("Bildschirm", selection: $store.config.displayID) {
                     Text("Automatisch (Notch-Display bevorzugt)").tag("auto")
                     Text("Hauptbildschirm").tag("main")
@@ -110,6 +113,15 @@ private struct WorkflowSettings: View {
                     }
                 }
                 TextField("Startbefehl", text: $store.config.initialCommand)
+            }
+            Section("Sessions fortsetzen") {
+                Picker("Öffnen über", selection: $store.config.resumeStrategy) {
+                    ForEach(ResumeStrategy.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Text(SessionResumer.isAirlockInstalled
+                     ? "airlock ist installiert: „Automatisch“ öffnet den Ordner und startet claude – airlock setzt die letzte Session dieses Ordners fort."
+                     : "airlock wurde nicht gefunden: „Automatisch“ verwendet claude --resume <session-id>.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Prompts & Git") {
                 TextField("Standard-Basisbranch", text: $store.config.defaultBaseBranch)
@@ -233,6 +245,7 @@ private struct ShortcutSettings: View {
                 shortcut("P", "PR öffnen bzw. erstellen lassen")
                 shortcut("D, →", "Details")
                 shortcut("N", "Neue Session")
+                shortcut("H", "Alle Sessions (Verlauf)")
                 shortcut("R", "Aktualisieren")
                 shortcut("esc, ←", "Zurück / schließen")
             }

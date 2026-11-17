@@ -306,6 +306,7 @@ final class NotchPanelController: NSObject {
             store.select(index: digit - 1)
             return true
         }
+        if c == "h" { store.route = .history; return true }
         guard let s = selected else {
             if c == "n" { store.route = .newSession; return true }
             return false

@@ -23,9 +23,16 @@ public enum SessionActions {
         guard let editor = config.editorOption else { throw ActionError.message("Kein Editor konfiguriert.") }
         if Shell.which(editor.command) != nil {
             try await Shell.runChecked(editor.command, [path], timeout: 10)
-        } else {
-            try await Shell.runChecked("/usr/bin/open", ["-a", editor.appName, path], timeout: 10)
+            return
         }
+        // No CLI launcher installed: open the app bundle, trying known variants (e.g. PyCharm CE).
+        var lastError = ""
+        for app in [editor.appName] + editor.alternateAppNames {
+            let r = await Shell.run("/usr/bin/open", ["-a", app, path], timeout: 10)
+            if r.ok { return }
+            lastError = r.stderr
+        }
+        throw ActionError.message("\(editor.label) konnte nicht geöffnet werden. " + lastError.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     public static func openInGitGui(path: String, config: AppConfig) async throws {

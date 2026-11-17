@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Notch öffnen", action: #selector(openNotch), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Neue Session …", action: #selector(newSession), keyEquivalent: "n").target = self
+        menu.addItem(withTitle: "Alle Sessions …", action: #selector(showHistory), keyEquivalent: "h").target = self
         menu.addItem(withTitle: "Einstellungen …", action: #selector(openSettingsAction), keyEquivalent: ",").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "QodeNotch beenden", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -144,6 +145,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettingsAction() { openSettings() }
+
+    @objc private func showHistory() {
+        store.route = .history
+        panelController?.expand(makeKey: true)
+    }
 
     // MARK: Settings window
 

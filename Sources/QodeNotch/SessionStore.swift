@@ -8,6 +8,7 @@ enum NotchRoute: Equatable {
     case list
     case detail(String)
     case newSession
+    case history
 }
 
 /// Central app state: polls sessions, tracks UI state, performs actions.
@@ -19,6 +20,8 @@ final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [ClaudeSession] = []
     @Published private(set) var prStatuses: [String: PrStatus] = [:]
     @Published private(set) var hookState: HookManager.InstallState = .notInstalled
+    @Published private(set) var history: [PastSession] = []
+    @Published private(set) var isLoadingHistory = false
     @Published var config: AppConfig = .load() {
         didSet {
             guard config != oldValue else { return }
@@ -321,6 +324,38 @@ final class SessionStore: ObservableObject {
             showToast(error.localizedDescription, error: true)
             return false
         }
+    }
+
+    // MARK: Session history
+
+    func loadHistory() {
+        isLoadingHistory = history.isEmpty
+        Task {
+            let list = await SessionHistory.shared.list()
+            history = list
+            isLoadingHistory = false
+        }
+    }
+
+    /// The running session that corresponds to a past one, if any.
+    func liveSession(for past: PastSession) -> ClaudeSession? {
+        if let s = liveSessions.first(where: { $0.id == past.id }) { return s }
+        // airlock allows one container per folder: a running one there *is* that session.
+        if let dir = past.workingDirectory, SessionResumer.effectiveStrategy(config.resumeStrategy) == .airlock {
+            return liveSessions.first { $0.workingDirectory == dir && $0.isContainerized }
+        }
+        return nil
+    }
+
+    /// Reopen a past session (or jump to it if it is still running).
+    func resume(_ past: PastSession) {
+        if let live = liveSession(for: past) {
+            focus(live)
+            return
+        }
+        let cfg = config
+        let how = SessionResumer.effectiveStrategy(cfg.resumeStrategy) == .airlock ? "mit airlock geöffnet" : "wird fortgesetzt"
+        perform("\(past.repoName) \(how)") { try await SessionResumer.resume(past, config: cfg) }
     }
 
     // MARK: Detail data

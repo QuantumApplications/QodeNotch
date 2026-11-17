@@ -61,7 +61,7 @@ struct SessionDetailView: View {
             StatusOrb(status: s.status, size: 9)
             VStack(alignment: .leading, spacing: 1) {
                 Text(s.displayTitle).font(.system(size: 13, weight: .bold)).lineLimit(1)
-                Text(Paths.abbreviateHome(s.workingDirectory)).font(.system(size: 10)).foregroundStyle(.white.opacity(0.45)).lineLimit(1).truncationMode(.middle)
+                Text(Paths.abbreviateHome(s.workingDirectory)).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.45)).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
             StatusPill(status: s.status)
@@ -95,11 +95,11 @@ struct SessionDetailView: View {
                     store.rename(s, title: editTitle, description: editDescription)
                     editing = false
                 }
-                PillButton(title: "Abbrechen", color: .white, filled: false) { editing = false }
+                PillButton(title: "Abbrechen", color: Color.primary, filled: false) { editing = false }
             }
         }
         .padding(8)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var approvalBox: some View {
@@ -131,7 +131,7 @@ struct SessionDetailView: View {
             FittingScrollView(maxHeight: maxBodyHeight) {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     if conversation.isEmpty {
-                        Text("Kein Verlauf gefunden.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                        Text("Kein Verlauf gefunden.").font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.4))
                     }
                     ForEach(conversation.suffix(150)) { m in
                         MessageBubble(message: m).id(m.id)
@@ -155,12 +155,12 @@ struct SessionDetailView: View {
                     HStack {
                         Chip(text: git.branch, symbol: "arrow.triangle.branch")
                         GitStatsView(git: git)
-                        if git.untrackedFiles > 0 { Text("\(git.untrackedFiles) neu").font(.system(size: 10)).foregroundStyle(.white.opacity(0.45)) }
+                        if git.untrackedFiles > 0 { Text("\(git.untrackedFiles) neu").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.45)) }
                     }
                 }
                 Text(diffStat ?? "Keine Änderungen gegenüber HEAD.")
                     .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Color.primary.opacity(0.75))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -199,8 +199,8 @@ struct SessionDetailView: View {
 
     private func info(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top) {
-            Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).frame(width: 100, alignment: .leading)
-            Text(value).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).textSelection(.enabled).lineLimit(2)
+            Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.45)).frame(width: 100, alignment: .leading)
+            Text(value).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Color.primary.opacity(0.8)).textSelection(.enabled).lineLimit(2)
             Spacer(minLength: 0)
         }
     }
@@ -222,7 +222,7 @@ private struct MessageBubble: View {
                 if let text = message.text {
                     Text(markdown(text))
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(isUser ? 0.95 : 0.8))
+                        .foregroundStyle(Color.primary.opacity(isUser ? 0.95 : 0.8))
                         .textSelection(.enabled)
                         .lineLimit(isUser ? 8 : 24)
                 }
@@ -234,11 +234,11 @@ private struct MessageBubble: View {
                             Text(summary).font(.system(size: 9.5, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                         }
                     }
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Color.primary.opacity(0.5))
                 }
             }
             .padding(7)
-            .background(isUser ? SessionStatus.working.color.opacity(0.22) : Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
+            .background(isUser ? SessionStatus.working.color.opacity(0.22) : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
             if !isUser { Spacer(minLength: 40) }
         }
     }
