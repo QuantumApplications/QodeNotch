@@ -1,1 +1,84 @@
 # QodeNotch
+
+Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-Sessions direkt in der **Notch** deines MacBooks zeigt und steuert – mit dem Funktionsumfang von [claude-control](https://github.com/sverrirsig/claude-control), aber als Notch-Insel im Stil von [CodeIsland](https://github.com/wxtsky/CodeIsland).
+
+- **Eingeklappt:** Ein schwarzer „Flügel“ links und rechts der Notch – farbiger Status-Punkt (pulsiert bei *arbeitet*, hüpft bei *wartet*), Repo-Name der wichtigsten Session und Zähler für wartende/aktive Sessions.
+- **Aufgeklappt** (Hover, Klick, ⌘⇧I oder automatisch bei Freigabe-Anfragen): Liste aller Sessions mit Status, Task, Branch, Git-Diff, PR-Status und letzter Nachricht, Freigabe-Buttons, Antwortfeld, Schnellzugriffe und Detailansicht.
+- Auf Bildschirmen ohne Notch wird eine Notch in der Menüleiste simuliert.
+
+## Funktionen
+
+| Bereich | Was QodeNotch kann |
+| --- | --- |
+| **Erkennung** | Findet alle `claude`-Prozesse (`ps`, `lsof`), ordnet ihnen per Hook-Ereignis exakt das richtige JSONL-Transcript zu (Fallback: neuestes Transcript im Projektordner). |
+| **Status** | *Arbeitet*, *Wartet* (Tool-Freigabe oder Rückfrage), *Bereit*, *Fehler*, *Beendet* – in Echtzeit über Claude-Code-Hooks, ergänzt um CPU- und Transcript-Heuristiken. |
+| **Kontext** | Task-Titel (erster Prompt oder Linear-Ticket aus MCP-Ergebnissen), letzte Nachricht, aktuelles Tool samt Eingabe, Warnungen bei riskanten Bash-Befehlen (`sudo`, `rm -rf`, `--force`, `eval`, Pipe in Shell …). |
+| **Git & PRs** | Branch, geänderte Dateien, +/- Zeilen, Worktree-Erkennung, offener PR über `gh` mit CI-Checks, Review-Status, offenen Threads, Merge-Konflikten, merged/closed. |
+| **Aktionen** | Erlauben / Immer erlauben / Ablehnen, Antwort senden, zum Terminal-Tab springen, Editor, Git-Client, Finder, PR öffnen oder „PR erstellen“-Prompt senden, Session beenden, Titel/Beschreibung überschreiben. |
+| **Neue Sessions** | Repo aus Code-Verzeichnissen wählen (oder Ordner), optional neuen Git-Worktree `<repo>-<branch>` von einem Basisbranch anlegen, Start-Prompt, optional in tmux. |
+| **Aufräumen** | Worktree-Session beenden, Worktree entfernen, lokalen Branch löschen, optional zugehörige Terminal-/Git-Client-/Browser-Tabs schließen (zweistufige Bestätigung). |
+| **Benachrichtigungen** | Mitteilungen und Töne pro Ereignis (wartet / fertig / Fehler), Klick springt ins Terminal. |
+| **Verwaist** | Sessions, deren Terminal geschlossen wurde oder deren tmux-Session getrennt ist, werden markiert; tmux-Sessions lassen sich wieder anhängen. |
+
+### Unterstützte Terminals
+
+| Terminal | Tab-Fokus | Text/Tasten senden | Neue Session |
+| --- | --- | --- | --- |
+| Terminal.app | ✓ (TTY-genau) | ✓ | ✓ |
+| iTerm2 | ✓ (TTY-genau) | ✓ ohne Fokuswechsel | ✓ |
+| kitty | ✓ (Remote Control*) | ✓ | ✓ |
+| WezTerm | ✓ (`wezterm cli`) | ✓ ohne Fokuswechsel | ✓ |
+| cmux | ✓ | ✓ | ✓ |
+| Ghostty, Warp, Alacritty | App-Ebene | via System Events | ✓ |
+| **tmux** (in jedem Terminal) | Fenster + Pane | ✓ `send-keys`, ohne Fokus | ✓ |
+
+\* kitty: `allow_remote_control yes` und `listen_on unix:/tmp/kitty` in `kitty.conf`.
+
+### Tastenkürzel
+
+Global: **⌘⇧I** Notch öffnen/schließen, optional **⌘⇧A / ⌘⇧D** erste wartende Session erlauben/ablehnen.
+
+In der geöffneten Notch (nach Klick hinein bzw. via ⌘⇧I): `1–9` wählen · `⇥`/`↑↓` wechseln · `A`/`X` erlauben/ablehnen · `↩` Terminal · `E` Editor · `G` Git-Client · `F` Finder · `P` PR · `D`/`→` Details · `N` neue Session · `R` aktualisieren · `esc` zurück/schließen.
+
+## Installation
+
+Voraussetzungen: macOS 14+, Xcode 15+ bzw. Swift 5.9+ (Command Line Tools reichen).
+
+```bash
+git clone https://github.com/QuantumApplications/QodeNotch.git
+cd QodeNotch
+./scripts/build-app.sh --install   # baut build/QodeNotch.app und kopiert sie nach /Applications
+open /Applications/QodeNotch.app
+```
+
+Zum Entwickeln: `swift run QodeNotch` (ohne App-Bundle funktionieren Mitteilungen und Login-Objekt nicht) und `swift test`.
+
+Fertige Builds liegen außerdem als Artefakt `QodeNotch.zip` an jedem Lauf der GitHub-Action **Build**. Die App ist nur ad-hoc signiert: beim ersten Start per Rechtsklick → *Öffnen* bestätigen.
+
+### Berechtigungen
+
+- **Automation** (Abfrage beim ersten Mal): zum Steuern von Terminal, iTerm2, cmux, System Events.
+- **Bedienungshilfen**: nur für Terminals ohne Skript-Schnittstelle (Terminal.app-Tastatureingaben, Ghostty, Warp, Alacritty) und zum Schließen von Git-Client-Tabs.
+- **Mitteilungen**: für Desktop-Hinweise.
+
+Optional: `gh` (eingeloggt) für PR-Status, `tmux` für Steuerung ohne Fokuswechsel.
+
+## Wie es funktioniert
+
+Beim Start installiert QodeNotch ein kleines Shell-Skript als Hook in `~/.claude/settings.json` (bestehende Hooks bleiben erhalten, einmaliges Backup als `settings.json.qodenotch-backup`). Bei jedem Ereignis (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`, …) schreibt es den Hook-Payload nach `~/.qodenotch/events/<claude-pid>.json`. Die App fragt jede Sekunde Prozesse, Hook-Dateien und die Enden der JSONL-Transcripts ab – es gibt keine Datenbank, alles wird jedes Mal neu berechnet. Freigaben werden als Tastendruck (↩ / Esc / „2“) an das jeweilige Terminal bzw. die tmux-Pane geschickt.
+
+Konfiguration: `~/.qodenotch/config.json` (oder über die Einstellungen). Hooks lassen sich unter *Einstellungen → Hooks* wieder entfernen.
+
+## Projektstruktur
+
+```
+Package.swift
+Sources/QodeNotchCore/   plattformneutrale Logik (Prozesse, Hooks, Transcripts, Status, Git/PR, Terminals, Worktrees)
+Sources/QodeNotch/       macOS-App: Notch-Panel, SwiftUI-Views, Einstellungen, Hotkeys, Mitteilungen
+Tests/QodeNotchCoreTests Unit-Tests (laufen auch unter Linux)
+scripts/build-app.sh     baut und signiert QodeNotch.app
+```
+
+## Lizenz
+
+MIT
