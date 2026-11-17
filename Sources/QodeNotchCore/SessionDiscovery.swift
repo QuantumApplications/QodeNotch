@@ -1,0 +1,192 @@
+import Foundation
+
+/// Finds running Claude Code sessions and builds their full state.
+/// All state is recomputed from the process table, hook events and transcripts.
+public actor SessionDiscovery {
+    public init() {}
+
+    private var lastOrphanCheck = Date.distantPast
+    private var orphaned: Set<Int32> = []
+    private var tmuxSessionByPid: [Int32: String] = [:]
+    private var terminalNameByPid: [Int32: String] = [:]
+
+    /// Slow per-session data (git, PR) cached between polls.
+    private struct SlowCache {
+        var git: GitSummary?
+        var mainWorktree: String?
+        var prUrl: String?
+        var at: Date
+    }
+    private var slowCache: [String: SlowCache] = [:]
+    private let slowTTL: TimeInterval = 5
+
+    /// Recently finished sessions (kept for display until the user dismisses them).
+    private var finished: [String: ClaudeSession] = [:]
+
+    public func discover(includeFinished: Bool = false) async -> [ClaudeSession] {
+        async let treeT = ProcessScanner.buildTree()
+        let hooks = HookManager.readAll()
+        let meta = SessionMetaStore.load()
+        let tree = await treeT
+        let pids = ProcessScanner.claudePids(in: tree)
+        let cwds = await ProcessScanner.workingDirectories(for: pids)
+        let alive = Set(pids)
+
+        if Date().timeIntervalSince(lastOrphanCheck) > 30 || pids.contains(where: { terminalNameByPid[$0] == nil }) {
+            await refreshTerminalInfo(pids: pids, tree: tree)
+        }
+
+        // Transcripts already claimed by hook events must not be reused by the mtime fallback.
+        var claimed = Set<String>()
+        for (pid, ev) in hooks where alive.contains(pid) {
+            if let t = ev.transcriptPath { claimed.insert(t) }
+        }
+
+        var sessions: [ClaudeSession] = []
+        await withTaskGroup(of: ClaudeSession?.self) { group in
+            for pid in pids {
+                guard let cwd = cwds[pid] ?? hooks[pid]?.cwd else { continue }
+                let entry = tree[pid]
+                let hook = hooks[pid]
+                let claimedCopy = claimed
+                group.addTask {
+                    await self.build(pid: pid, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, claimed: claimedCopy)
+                }
+            }
+            for await s in group { if let s { sessions.append(s) } }
+        }
+
+        // Two processes may resolve to the same transcript via the fallback; keep ids unique.
+        var seen = Set<String>()
+        sessions = sessions.sorted { ($0.pid ?? 0) < ($1.pid ?? 0) }.map { s in
+            var s = s
+            if !seen.insert(s.id).inserted { s.id = "pid-\(s.pid ?? 0)" }
+            return s
+        }
+
+        SessionMetaStore.apply(meta, to: &sessions)
+
+        // Track sessions that disappeared so they can be shown as finished.
+        let currentIds = Set(sessions.map(\.id))
+        for (id, var s) in previous where !currentIds.contains(id) && s.status != .finished {
+            s.status = .finished
+            s.pid = nil
+            finished[id] = s
+        }
+        for id in currentIds { finished.removeValue(forKey: id) }
+        finished = finished.filter { Date().timeIntervalSince($0.value.lastActivity) < 24 * 3600 }
+        previous = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        HookManager.pruneDead(alive: alive)
+        return includeFinished ? sessions + finished.values.sorted { $0.lastActivity > $1.lastActivity } : sessions
+    }
+
+    private var previous: [String: ClaudeSession] = [:]
+
+    public func dismissFinished(id: String) {
+        finished.removeValue(forKey: id)
+    }
+
+    public func clearFinished() {
+        finished.removeAll()
+    }
+
+    private func refreshTerminalInfo(pids: [Int32], tree: ProcessTree) async {
+        lastOrphanCheck = Date()
+        async let ttysT = ProcessScanner.ttys(for: pids)
+        async let panesT = TerminalDetector.tmuxPanes()
+        async let clientsT = TerminalDetector.tmuxClients()
+        let (ttys, panes, clients) = await (ttysT, panesT, clientsT)
+        let attached = Set(clients.map(\.sessionName))
+        var newOrphaned = Set<Int32>()
+        var newTmux: [Int32: String] = [:]
+        var names: [Int32: String] = [:]
+        for pid in pids {
+            let pane = ttys[pid].flatMap { panes[$0] }
+            if TerminalDetector.isOrphaned(pid: pid, tree: tree, inTmux: pane != nil, tmuxHasClient: pane.map { attached.contains($0.sessionName) } ?? false) {
+                newOrphaned.insert(pid)
+            }
+            if let pane {
+                newTmux[pid] = pane.sessionName
+                let client = clients.first { $0.sessionName == pane.sessionName }
+                let app = client.map { TerminalDetector.findTerminal(from: $0.pid, in: tree) } ?? .unknown
+                names[pid] = app == .unknown ? "tmux" : "\(app.displayName) · tmux"
+            } else {
+                let app = TerminalDetector.findTerminal(from: pid, in: tree)
+                names[pid] = app == .unknown ? "" : app.displayName
+            }
+        }
+        orphaned = newOrphaned
+        tmuxSessionByPid = newTmux
+        terminalNameByPid = names
+    }
+
+    private func slowData(cwd: String, branchHint: String?) async -> SlowCache {
+        if let c = slowCache[cwd], Date().timeIntervalSince(c.at) < slowTTL { return c }
+        async let gitT = GitInfo.summary(cwd: cwd)
+        async let mainT = GitInfo.mainWorktree(cwd: cwd)
+        let (git, main) = await (gitT, mainT)
+        var pr: String?
+        if let branch = git?.branch ?? branchHint, !["main", "master", "HEAD", "develop", "trunk"].contains(branch) {
+            pr = await PullRequestService.shared.prUrl(cwd: cwd, branch: branch)
+        }
+        let c = SlowCache(git: git, mainWorktree: main, prUrl: pr, at: Date())
+        slowCache[cwd] = c
+        return c
+    }
+
+    private func build(pid: Int32, cwd: String, cpu: Double, hook: HookEvent?, claimed: Set<String>) async -> ClaudeSession? {
+        let transcript = hook?.transcriptPath ?? TranscriptReader.latestTranscript(in: Paths.projectDir(for: cwd), excluding: claimed)
+
+        var tail: [TranscriptLine] = []
+        var head: [TranscriptLine] = []
+        var mtime: Date?
+        if let t = transcript {
+            tail = TranscriptReader.readTail(t)
+            head = TranscriptReader.readHead(t)
+            mtime = TranscriptReader.mtime(t)
+        }
+
+        let slow = await slowData(cwd: cwd, branchHint: TranscriptReader.branch(tail))
+        let pending = TranscriptReader.hasPendingToolUse(tail)
+        let asking = TranscriptReader.isAskingForInput(tail)
+        let hasError = TranscriptReader.lastMessageHasError(tail)
+
+        let status = StatusClassifier.classify(.init(
+            pidAlive: true, transcriptMtime: mtime, cpuPercent: cpu, hasError: hasError, isAskingForInput: asking,
+            hasPendingToolUse: pending, hookStatus: hook?.impliedStatus, hookTimestamp: hook?.timestamp))
+
+        let lastActivity = [mtime, hook?.timestamp].compactMap { $0 }.max() ?? Date()
+        let recentActivity = Date().timeIntervalSince(lastActivity) < 60
+        let isWorktree = slow.mainWorktree != nil && slow.mainWorktree != cwd
+
+        return ClaudeSession(
+            id: hook?.sessionId ?? TranscriptReader.sessionId(tail) ?? "pid-\(pid)",
+            pid: pid,
+            workingDirectory: cwd,
+            repoName: Paths.repoName(from: cwd),
+            parentRepo: isWorktree ? slow.mainWorktree : nil,
+            isWorktree: isWorktree,
+            branch: slow.git?.branch ?? TranscriptReader.branch(tail),
+            status: status,
+            lastActivity: lastActivity,
+            startedAt: TranscriptReader.startedAt(head),
+            git: slow.git,
+            preview: TranscriptReader.preview(tail),
+            taskSummary: TranscriptReader.taskSummary(head),
+            hasPendingToolUse: pending,
+            jsonlPath: transcript,
+            prUrl: slow.prUrl,
+            orphaned: recentActivity ? false : orphaned.contains(pid),
+            tmuxSession: tmuxSessionByPid[pid],
+            cpuPercent: cpu,
+            terminalName: terminalNameByPid[pid].flatMap { $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    /// Force git/PR data to refresh on the next poll.
+    public func invalidateSlowCache(cwd: String? = nil) async {
+        if let cwd { slowCache.removeValue(forKey: cwd) } else { slowCache.removeAll() }
+        await PullRequestService.shared.invalidate()
+    }
+}
