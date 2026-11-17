@@ -57,7 +57,24 @@ public enum SessionActions {
     public static func terminal(for session: ClaudeSession) async throws -> TerminalInfo {
         guard session.desktopSessionId == nil else { throw ActionError.message("Diese Session läuft in Claude Desktop – bitte dort beantworten.") }
         guard let pid = session.pid else { throw TerminalError.noProcess }
-        return await TerminalDetector.detect(pid: pid)
+        var info = await TerminalDetector.detect(pid: pid)
+        info.projectHints = projectHints(for: session)
+        return info
+    }
+
+    /// Folder names an IDE window title may contain, most specific first.
+    static func projectHints(for session: ClaudeSession) -> [String] {
+        var hints: [String] = []
+        var path = session.workingDirectory
+        let stop = Set([Paths.home, "/", "/Users"])
+        while !stop.contains(path), !path.isEmpty {
+            let name = Paths.repoName(from: path)
+            if !hints.contains(name) { hints.append(name) }
+            path = URL(fileURLWithPath: path).deletingLastPathComponent().path
+            if hints.count >= 4 { break }
+        }
+        if let parent = session.parentRepo.map(Paths.repoName(from:)), !hints.contains(parent) { hints.insert(parent, at: min(1, hints.count)) }
+        return hints
     }
 
     public static func focus(_ session: ClaudeSession) async throws {

@@ -13,7 +13,7 @@ Native macOS-App (Swift, AppKit + SwiftUI), die alle laufenden **Claude Code**-S
 | **Erkennung** | Findet alle `claude`-Prozesse (`ps`, `lsof`), ordnet ihnen per Hook-Ereignis exakt das richtige JSONL-Transcript zu (Fallback: neuestes Transcript im Projektordner). |
 | **Status** | *Arbeitet*, *Wartet* (Tool-Freigabe oder Rückfrage), *Bereit*, *Fehler*, *Beendet* – in Echtzeit über Claude-Code-Hooks, ergänzt um CPU- und Transcript-Heuristiken. |
 | **Kontext** | Task-Titel (erster Prompt oder Linear-Ticket aus MCP-Ergebnissen), letzte Nachricht, aktuelles Tool samt Eingabe, Warnungen bei riskanten Bash-Befehlen (`sudo`, `rm -rf`, `--force`, `eval`, Pipe in Shell …). |
-| **Git & PRs** | Branch, geänderte Dateien, +/- Zeilen, Worktree-Erkennung, offener PR über `gh` mit CI-Checks, Review-Status, offenen Threads, Merge-Konflikten, merged/closed. |
+| **Git & PRs/MRs** | Branch, geänderte Dateien, +/- Zeilen, Worktree-Erkennung. GitHub-PRs über `gh`, GitLab-Merge-Requests (auch self-hosted) über `glab` – automatisch nach Git-Remote erkannt: CI-Checks bzw. Pipeline, Review/Approvals, offene Threads, Merge-Konflikte, merged/closed. |
 | **Aktionen** | Erlauben / Immer erlauben / Ablehnen, Antwort senden, zum Terminal-Tab springen, Editor, Git-Client, Finder, PR öffnen oder „PR erstellen“-Prompt senden, Session beenden, Titel/Beschreibung überschreiben. |
 | **Neue Sessions** | Repo aus Code-Verzeichnissen wählen (oder Ordner), optional neuen Git-Worktree `<repo>-<branch>` von einem Basisbranch anlegen, Start-Prompt, optional in tmux. |
 | **Alle Sessions** | Verlauf aller in `~/.claude/projects` gespeicherten Sessions (Titel, Repo, Pfad, Branch, Zeit), durchsuchbar, Öffnen per Klick/Doppelklick oder `H`. Normal per `claude --resume <id>`; mit airlock wird in den Ordner gewechselt und `claude` gestartet – airlock setzt die letzte Session automatisch fort. Laufende Sessions werden stattdessen im Terminal fokussiert. |
@@ -39,12 +39,13 @@ Läuft Claude Code in einem Container – z. B. mit [airlock](https://github.com
 | cmux | ✓ | ✓ | ✓ |
 | Ghostty, Warp, Alacritty | App-Ebene | via System Events | ✓ |
 | **tmux** (in jedem Terminal) | Fenster + Pane | ✓ `send-keys`, ohne Fokus | ✓ |
+| IDE-Terminals (PyCharm & JetBrains, VS Code, Cursor …) | Projektfenster | via System Events, nur wenn das Terminal (nicht der Editor) fokussiert ist | – |
 
 \* kitty: `allow_remote_control yes` und `listen_on unix:/tmp/kitty` in `kitty.conf`.
 
 ### Tastenkürzel
 
-Global: **⌘⇧I** Notch öffnen/schließen, optional **⌘⇧A / ⌘⇧D** erste wartende Session erlauben/ablehnen.
+Global (in den Einstellungen frei belegbar): **⌘⇧I** Notch öffnen/schließen, optional **⌘⇧A / ⌘⇧D** erste wartende Session erlauben/ablehnen.
 
 In der geöffneten Notch (nach Klick hinein bzw. via ⌘⇧I): `1–9` wählen · `⇥`/`↑↓` wechseln · `A`/`X` erlauben/ablehnen · `↩` Terminal · `E` Editor · `G` Git-Client · `F` Finder · `P` PR · `D`/`→` Details · `N` neue Session · `H` alle Sessions · `U` Limits & Nutzung · `R` aktualisieren · `esc` zurück/schließen.
 
@@ -75,7 +76,7 @@ oder nach dem ersten Startversuch unter *Systemeinstellungen → Datenschutz & S
 - **Bedienungshilfen**: nur für Terminals ohne Skript-Schnittstelle (Terminal.app-Tastatureingaben, Ghostty, Warp, Alacritty) und zum Schließen von Git-Client-Tabs.
 - **Mitteilungen**: für Desktop-Hinweise.
 
-Optional: `gh` (eingeloggt) für PR-Status, `tmux` für Steuerung ohne Fokuswechsel.
+Optional: `gh` bzw. `glab` (eingeloggt) für PR-/MR-Status, `tmux` für Steuerung ohne Fokuswechsel.
 
 ## Wie es funktioniert
 

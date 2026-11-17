@@ -147,7 +147,7 @@ struct PrBadge: View {
         let (color, symbol) = style
         HStack(spacing: 3) {
             Image(systemName: symbol).scaledFont(size: 8, weight: .bold)
-            Text("#\(status?.number ?? url.split(separator: "/").last.map(String.init) ?? "PR")")
+            Text("\(PullRequestService.isMergeRequestURL(url) ? "!" : "#")\(status?.number ?? url.split(separator: "/").last.map(String.init) ?? "PR")")
                 .scaledFont(size: 10, weight: .semibold)
             if let s = status {
                 if s.unresolvedThreads > 0 {

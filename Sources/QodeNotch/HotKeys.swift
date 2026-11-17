@@ -1,4 +1,5 @@
 import AppKit
+import QodeNotchCore
 import Carbon.HIToolbox
 
 /// System-wide hotkeys via Carbon (no accessibility permission needed).
@@ -35,6 +36,19 @@ final class HotKeyCenter {
             handlers[id] = handler
         }
         return id
+    }
+
+    /// True while a shortcut is being recorded – global hotkeys must not fire then.
+    private(set) var isSuspended = false
+
+    func setSuspended(_ suspended: Bool) {
+        isSuspended = suspended
+        if suspended { unregisterAll() }
+    }
+
+    @discardableResult
+    func register(_ spec: HotKeySpec, handler: @escaping () -> Void) -> UInt32 {
+        register(keyCode: spec.keyCode, modifiers: spec.modifiers, handler: handler)
     }
 
     func unregisterAll() {

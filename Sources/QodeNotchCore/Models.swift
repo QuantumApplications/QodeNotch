@@ -152,6 +152,9 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
     public var awaitingPermission: Bool = false
     /// Time of the latest hook event for this session.
     public var lastHookAt: Date?
+    /// "github" or "gitlab" – where pull/merge requests for this repo live.
+    public var forge: String?
+    public var isGitLab: Bool { forge == "gitlab" }
 
     public var isDesktop: Bool { desktopSessionId != nil }
     /// Keystrokes can only reach sessions that live in a terminal.

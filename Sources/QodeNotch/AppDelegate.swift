@@ -44,7 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLaunchAtLogin(store.config.launchAtLogin)
 
         store.configDidChange
-            .removeDuplicates { $0.hotkeyToggle == $1.hotkeyToggle && $0.hotkeyApproveDeny == $1.hotkeyApproveDeny && $0.launchAtLogin == $1.launchAtLogin }
+            .removeDuplicates {
+                $0.hotkeyToggle == $1.hotkeyToggle && $0.hotkeyApproveDeny == $1.hotkeyApproveDeny && $0.launchAtLogin == $1.launchAtLogin
+                    && $0.hotkeyToggleKey == $1.hotkeyToggleKey && $0.hotkeyApproveKey == $1.hotkeyApproveKey && $0.hotkeyDenyKey == $1.hotkeyDenyKey
+            }
             .sink { [weak self] cfg in
                 self?.registerHotKeys()
                 self?.applyLaunchAtLogin(cfg.launchAtLogin)
@@ -66,20 +69,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func registerHotKeys() {
         HotKeyCenter.shared.unregisterAll()
-        if store.config.hotkeyToggle {
-            HotKeyCenter.shared.register(keyCode: kVK_ANSI_I) { [weak self] in self?.panelController?.toggle() }
+        // Paused while the settings window records a new shortcut.
+        guard !HotKeyCenter.shared.isSuspended else { return }
+        let cfg = store.config
+        if cfg.hotkeyToggle {
+            HotKeyCenter.shared.register(cfg.hotkeyToggleKey) { [weak self] in self?.panelController?.toggle() }
         }
-        if store.config.hotkeyApproveDeny {
-            HotKeyCenter.shared.register(keyCode: kVK_ANSI_A) { [weak self] in
+        if cfg.hotkeyApproveDeny {
+            HotKeyCenter.shared.register(cfg.hotkeyApproveKey) { [weak self] in
                 guard let self, let s = self.store.firstWaiting else { return }
                 self.store.approve(s)
             }
-            HotKeyCenter.shared.register(keyCode: kVK_ANSI_D) { [weak self] in
+            HotKeyCenter.shared.register(cfg.hotkeyDenyKey) { [weak self] in
                 guard let self, let s = self.store.firstWaiting else { return }
                 self.store.reject(s)
             }
         }
     }
+
+    /// Re-register after the recorder finished (or the config changed).
+    func reloadHotKeys() { registerHotKeys() }
 
     // MARK: Launch at login
 

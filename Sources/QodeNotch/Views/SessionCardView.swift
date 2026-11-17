@@ -178,9 +178,9 @@ struct SessionCardView: View {
             }
             IconButton(symbol: "folder", help: "Im Finder zeigen", shortcut: "F") { store.openFinder(s) }
             if let _ = s.prUrl {
-                IconButton(symbol: "arrow.up.right.square", help: "Pull Request öffnen", shortcut: "P", tint: .green) { store.openPR(s) }
+                IconButton(symbol: "arrow.up.right.square", help: s.isGitLab ? "Merge Request öffnen" : "Pull Request öffnen", shortcut: "P", tint: .green) { store.openPR(s) }
             } else if s.canSendInput && s.status == .idle {
-                IconButton(symbol: "arrow.triangle.pull", help: "Pull Request erstellen lassen", shortcut: "P") { store.createPR(s) }
+                IconButton(symbol: "arrow.triangle.pull", help: s.isGitLab ? "Merge Request erstellen lassen" : "Pull Request erstellen lassen", shortcut: "P") { store.createPR(s) }
             }
             if s.orphaned && s.tmuxSession != nil {
                 IconButton(symbol: "link", help: "tmux-Session wieder anhängen", tint: .orange) { store.reattach(s) }
@@ -221,7 +221,7 @@ struct SessionCardView: View {
         Button("Im Editor öffnen") { store.openEditor(s) }
         Button("Im Git-Client öffnen") { store.openGitGui(s) }
         Button("Im Finder zeigen") { store.openFinder(s) }
-        if s.prUrl != nil { Button("Pull Request öffnen") { store.openPR(s) } }
+        if s.prUrl != nil { Button(s.isGitLab ? "Merge Request öffnen" : "Pull Request öffnen") { store.openPR(s) } }
         Divider()
         Button("Pfad kopieren") {
             NSPasteboard.general.clearContents()

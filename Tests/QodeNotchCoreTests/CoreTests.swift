@@ -493,3 +493,87 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(SessionActions.claudeDesktopURL(hostSessionId: "abc"))
     }
 }
+
+final class IDEAndForgeTests: XCTestCase {
+    func testPyCharmTerminalIsDetected() {
+        let tree = ProcessScanner.parseTree("""
+          1     0   0.0 /sbin/launchd
+        700     1   3.0 /Applications/PyCharm CE.app/Contents/MacOS/pycharm
+        701   700   0.0 /bin/zsh
+        702   701   0.0 /opt/homebrew/bin/podman
+        """)
+        let r = TerminalDetector.resolve(from: 702, in: tree)
+        XCTAssertEqual(r.app, .ide)
+        XCTAssertEqual(r.host, HostApp(name: "PyCharm CE", pid: 700))
+        XCTAssertFalse(TerminalDetector.isOrphaned(pid: 702, tree: tree, inTmux: false, tmuxHasClient: false))
+    }
+
+    func testVSCodeHelperResolvesToMainApp() {
+        let tree = ProcessScanner.parseTree("""
+          1     0   0.0 /sbin/launchd
+        800     1   1.0 /Applications/Visual Studio Code.app/Contents/MacOS/Electron
+        801   800   0.0 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)
+        802   801   0.0 /bin/zsh
+        803   802   9.0 claude
+        """)
+        XCTAssertEqual(TerminalDetector.resolve(from: 803, in: tree).host, HostApp(name: "Visual Studio Code", pid: 800))
+    }
+
+    func testRealTerminalWinsOverHostApp() {
+        let tree = ProcessScanner.parseTree("""
+          1     0   0.0 /sbin/launchd
+        500     1   1.0 /Applications/iTerm.app/Contents/MacOS/iTerm2
+        501   500   0.0 -zsh
+        502   501   1.0 claude
+        """)
+        let r = TerminalDetector.resolve(from: 502, in: tree)
+        XCTAssertEqual(r.app, .iterm)
+        XCTAssertNil(r.host)
+    }
+
+    func testEditorFocusGuard() {
+        XCTAssertTrue(IDETerminal.isEditor("AXTextArea | Editor for main.py | "))
+        XCTAssertFalse(IDETerminal.isEditor("AXTextArea | Terminal | Local"))
+        XCTAssertFalse(IDETerminal.isEditor("AXScrollArea | "))
+    }
+
+    func testHotKeyDisplayAndDecoding() throws {
+        XCTAssertEqual(HotKeySpec.defaultToggle.display, "⇧⌘I")
+        XCTAssertEqual(HotKeySpec(keyCode: 49, modifiers: HotKeySpec.control | HotKeySpec.option, key: "Space").display, "⌃⌥Space")
+        let c = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"hotkeyToggleKey":{"keyCode":45,"modifiers":4352,"key":"N"},"forge":"gitlab"}"#.utf8))
+        XCTAssertEqual(c.hotkeyToggleKey.display, "⌃⌘N")
+        XCTAssertEqual(c.forge, .gitlab)
+        XCTAssertEqual(AppConfig().hotkeyToggleKey, .defaultToggle)
+    }
+
+    func testRemoteHostParsing() {
+        XCTAssertEqual(PullRequestService.remoteHost("git@gitlab.example.com:group/repo.git"), "gitlab.example.com")
+        XCTAssertEqual(PullRequestService.remoteHost("https://github.com/o/r.git"), "github.com")
+        XCTAssertEqual(PullRequestService.remoteHost("ssh://git@code.firma.de:2222/team/app.git"), "code.firma.de")
+        XCTAssertEqual(PullRequestService.remoteHost("remote.origin.url https://gitlab.com/a/b"), "gitlab.com")
+        XCTAssertTrue(PullRequestService.isMergeRequestURL("https://gitlab.com/a/b/-/merge_requests/12"))
+    }
+
+    func testGitLabParsing() {
+        let list = #"[{"iid":3,"web_url":"https://gitlab.com/a/b/-/merge_requests/3"},{"iid":7,"web_url":"https://gitlab.com/a/b/-/merge_requests/7"}]"#
+        XCTAssertEqual(PullRequestService.parseGitLabMRList(list), "https://gitlab.com/a/b/-/merge_requests/7")
+        XCTAssertNil(PullRequestService.parseGitLabMRList("[]"))
+
+        let view = #"{"iid":7,"state":"opened","web_url":"https://gitlab.com/a/b/-/merge_requests/7","has_conflicts":true,"head_pipeline":{"status":"running"},"user_notes_count":4,"detailed_merge_status":"conflict"}"#
+        let approvals = #"{"approved":false,"approvals_left":1}"#
+        let discussions = #"[{"notes":[{"resolvable":true,"resolved":false}]},{"notes":[{"resolvable":true,"resolved":true}]},{"notes":[{"resolvable":false}]}]"#
+        let s = PullRequestService.parseGitLabStatus(view: view, approvals: approvals, discussions: discussions, fallbackUrl: "")
+        XCTAssertEqual(s?.state, "OPEN")
+        XCTAssertEqual(s?.checks, .pending)
+        XCTAssertEqual(s?.mergeable, "CONFLICTING")
+        XCTAssertEqual(s?.reviewDecision, "REVIEW_REQUIRED")
+        XCTAssertEqual(s?.unresolvedThreads, 1)
+        XCTAssertEqual(s?.commentCount, 4)
+        XCTAssertEqual(s?.number, "7")
+
+        let merged = PullRequestService.parseGitLabStatus(view: #"{"state":"merged","head_pipeline":{"status":"success"}}"#, approvals: #"{"approved":true}"#, discussions: nil, fallbackUrl: "u")
+        XCTAssertEqual(merged?.state, "MERGED")
+        XCTAssertEqual(merged?.checks, .passing)
+        XCTAssertEqual(merged?.reviewDecision, "APPROVED")
+    }
+}

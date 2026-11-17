@@ -10,6 +10,8 @@ public enum TerminalApp: String, Codable, CaseIterable, Sendable, Identifiable {
     case alacritty
     case warp
     case cmux
+    /// Terminal built into another app (PyCharm & other JetBrains IDEs, VS Code, Cursor …).
+    case ide
     case unknown
 
     public var id: String { rawValue }
@@ -25,7 +27,7 @@ public enum TerminalApp: String, Codable, CaseIterable, Sendable, Identifiable {
         case .alacritty: return "Alacritty"
         case .warp: return "Warp"
         case .cmux: return "cmux"
-        case .unknown: return "Terminal"
+        case .ide, .unknown: return "Terminal"
         }
     }
 
@@ -40,7 +42,7 @@ public enum TerminalApp: String, Codable, CaseIterable, Sendable, Identifiable {
         case .alacritty: return "alacritty"
         case .warp: return "Warp"
         case .cmux: return "cmux"
-        case .unknown: return "Terminal"
+        case .ide, .unknown: return "Terminal"
         }
     }
 
@@ -54,6 +56,7 @@ public enum TerminalApp: String, Codable, CaseIterable, Sendable, Identifiable {
         case .alacritty: return "Alacritty"
         case .warp: return "Warp"
         case .cmux: return "cmux"
+        case .ide: return "IDE-Terminal"
         case .unknown: return "Unbekannt"
         }
     }
@@ -66,7 +69,7 @@ public enum TerminalApp: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    public static var selectable: [TerminalApp] { allCases.filter { $0 != .unknown } }
+    public static var selectable: [TerminalApp] { allCases.filter { $0 != .unknown && $0 != .ide } }
 }
 
 /// Everything needed to address the terminal tab/pane hosting a claude process.
@@ -85,14 +88,34 @@ public struct TerminalInfo: Equatable, Sendable {
     public var pid: Int32
     public var tty: String
     public var tmux: Tmux?
+    /// The app hosting the terminal when `app == .ide`.
+    public var hostApp: HostApp?
+    /// Folder names that identify the session's window (deepest first).
+    public var projectHints: [String] = []
 
     public var inTmux: Bool { tmux != nil }
 
-    public init(app: TerminalApp, pid: Int32, tty: String, tmux: Tmux? = nil) {
+    public init(app: TerminalApp, pid: Int32, tty: String, tmux: Tmux? = nil, hostApp: HostApp? = nil) {
         self.app = app
         self.pid = pid
         self.tty = tty
         self.tmux = tmux
+        self.hostApp = hostApp
+    }
+
+    public var displayName: String { app == .ide ? (hostApp?.name ?? "IDE") : app.displayName }
+}
+
+/// A GUI app whose integrated terminal runs the session.
+public struct HostApp: Equatable, Sendable {
+    /// Bundle name, e.g. "PyCharm", "PyCharm CE", "Visual Studio Code".
+    public var name: String
+    /// PID of the app's main process (for System Events), if found.
+    public var pid: Int32?
+
+    public init(name: String, pid: Int32?) {
+        self.name = name
+        self.pid = pid
     }
 }
 
@@ -127,6 +150,50 @@ public enum TerminalDetector {
         if full.contains("warp.app") { return .warp }
         if full.contains("cmux") { return .cmux }
         return nil
+    }
+
+    /// Name of the outermost `.app` bundle in an executable path:
+    /// "/Applications/PyCharm CE.app/Contents/MacOS/pycharm" → "PyCharm CE".
+    public static func appBundleName(fromComm comm: String) -> String? {
+        guard let r = comm.range(of: ".app/") else { return nil }
+        let prefix = comm[..<r.lowerBound]
+        guard let name = prefix.split(separator: "/").last, !name.isEmpty else { return nil }
+        return String(name)
+    }
+
+    /// Apps whose child processes are not "the terminal" of a session.
+    static let ignoredHosts: Set<String> = ["Claude", "QodeNotch", "Finder", "Dock", "loginwindow"]
+
+    /// The GUI app hosting the shell when no known terminal is in the ancestry
+    /// (integrated terminals of IDEs). Prefers the app's main process.
+    public static func findHostApp(from pid: Int32, in tree: ProcessTree) -> HostApp? {
+        var current = pid
+        var visited = Set<Int32>()
+        var name: String?
+        var fallbackPid: Int32?
+        while current > 1, !visited.contains(current), let entry = tree[current] {
+            visited.insert(current)
+            if let bundle = appBundleName(fromComm: entry.comm), !ignoredHosts.contains(bundle) {
+                if name == nil { name = bundle; fallbackPid = current }
+                // Main executable: "<bundle>.app/Contents/MacOS/…" without nested helper bundles.
+                if bundle == name, entry.comm.contains(bundle + ".app/Contents/MacOS/"), !entry.comm.contains("/Frameworks/") {
+                    return HostApp(name: bundle, pid: current)
+                }
+            }
+            current = entry.ppid
+        }
+        guard let name else { return nil }
+        // Helper process (e.g. VS Code's "Code Helper"): no UI of its own.
+        let helper = tree[fallbackPid ?? 0]?.comm.contains("/Frameworks/") ?? true
+        return HostApp(name: name, pid: helper ? nil : fallbackPid)
+    }
+
+    /// Terminal or host app for a process: known terminal first, then IDE.
+    public static func resolve(from pid: Int32, in tree: ProcessTree) -> (app: TerminalApp, host: HostApp?) {
+        let app = findTerminal(from: pid, in: tree)
+        if app != .unknown { return (app, nil) }
+        if let host = findHostApp(from: pid, in: tree) { return (.ide, host) }
+        return (.unknown, nil)
     }
 
     /// Walk up from `pid` until a known terminal is found.
@@ -204,19 +271,20 @@ public enum TerminalDetector {
         if let pane = panes[tty] {
             let clients = await tmuxClients()
             let client = clients.first { $0.sessionName == pane.sessionName }
-            let app = client.map { findTerminal(from: $0.pid, in: t) } ?? .unknown
-            return TerminalInfo(app: app, pid: pid, tty: tty, tmux: .init(
+            let resolved = client.map { resolve(from: $0.pid, in: t) } ?? (.unknown, nil)
+            return TerminalInfo(app: resolved.app, pid: pid, tty: tty, tmux: .init(
                 paneId: pane.paneId, sessionName: pane.sessionName, windowIndex: pane.windowIndex,
-                paneIndex: pane.paneIndex, clientPid: client?.pid, clientTty: client?.tty ?? ""))
+                paneIndex: pane.paneIndex, clientPid: client?.pid, clientTty: client?.tty ?? ""), hostApp: resolved.host)
         }
-        return TerminalInfo(app: findTerminal(from: pid, in: t), pid: pid, tty: tty)
+        let resolved = resolve(from: pid, in: t)
+        return TerminalInfo(app: resolved.app, pid: pid, tty: tty, hostApp: resolved.host)
     }
 
     /// A session is orphaned when its terminal is gone (or its tmux session is detached).
     public static func isOrphaned(pid: Int32, tree: ProcessTree, inTmux: Bool, tmuxHasClient: Bool) -> Bool {
         if inTmux { return !tmuxHasClient }
         guard tree[pid] != nil else { return false }
-        if findTerminal(from: pid, in: tree) != .unknown { return false }
+        if resolve(from: pid, in: tree).app != .unknown { return false }
         // Remote (SSH) or IDE-hosted sessions are not orphans.
         var current = pid
         var visited = Set<Int32>()

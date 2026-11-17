@@ -137,9 +137,16 @@ private struct WorkflowSettings: View {
                     Text("Start-Prompt für neue Worktrees")
                     TextEditor(text: $store.config.initialPrompt).frame(height: 60).font(.system(size: 11))
                 }
+                Picker("Pull/Merge Requests", selection: $store.config.forge) {
+                    ForEach(ForgePreference.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
                 VStack(alignment: .leading) {
-                    Text("Prompt für „PR erstellen“ (P)")
+                    Text("Prompt für „PR erstellen“ (P) – GitHub")
                     TextEditor(text: $store.config.createPrPrompt).frame(height: 60).font(.system(size: 11))
+                }
+                VStack(alignment: .leading) {
+                    Text("Prompt für „MR erstellen“ (P) – GitLab")
+                    TextEditor(text: $store.config.createMrPrompt).frame(height: 60).font(.system(size: 11))
                 }
                 Stepper("Als veraltet markieren nach \(store.config.staleThresholdMinutes) min", value: $store.config.staleThresholdMinutes, in: 10...1440, step: 10)
                 Toggle("Beim Aufräumen Terminal-, Git-Client- und Browser-Tabs schließen", isOn: $store.config.cleanupCloseTabs)
@@ -175,6 +182,7 @@ private struct AppsSettings: View {
             Section("Voraussetzungen") {
                 requirement("git", "Branch-, Diff- und Worktree-Infos")
                 requirement("gh", "Pull-Request-Status (gh auth login)")
+                requirement("glab", "Merge-Request-Status (glab auth login)")
                 requirement("tmux", "Steuerung ohne Fokuswechsel")
                 Text("Für Terminal.app, Ghostty, Warp und Alacritty benötigt QodeNotch die Bedienungshilfen-Berechtigung (Tastatureingaben) und die Automation-Freigabe.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -240,8 +248,23 @@ private struct ShortcutSettings: View {
     var body: some View {
         Form {
             Section("Globale Kurzbefehle") {
-                Toggle("⌘⇧I – Notch öffnen/schließen", isOn: $store.config.hotkeyToggle)
-                Toggle("⌘⇧A / ⌘⇧D – erste wartende Session erlauben/ablehnen", isOn: $store.config.hotkeyApproveDeny)
+                Toggle("Notch öffnen/schließen", isOn: $store.config.hotkeyToggle)
+                if store.config.hotkeyToggle {
+                    LabeledContent("Tastenkürzel") {
+                        HotKeyRecorder(spec: $store.config.hotkeyToggleKey, defaultSpec: .defaultToggle)
+                    }
+                }
+                Toggle("Erste wartende Session erlauben/ablehnen", isOn: $store.config.hotkeyApproveDeny)
+                if store.config.hotkeyApproveDeny {
+                    LabeledContent("Erlauben") {
+                        HotKeyRecorder(spec: $store.config.hotkeyApproveKey, defaultSpec: .defaultApprove)
+                    }
+                    LabeledContent("Ablehnen") {
+                        HotKeyRecorder(spec: $store.config.hotkeyDenyKey, defaultSpec: .defaultDeny)
+                    }
+                }
+                Text("Zum Ändern auf das Kürzel klicken und die neue Kombination drücken (mit ⌘, ⌃ oder ⌥). Esc bricht ab. Kürzel, die schon eine andere App belegt, funktionieren eventuell nicht.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("In der geöffneten Notch") {
                 Toggle("Tastenhinweise anzeigen", isOn: $store.config.showKeyboardHints)

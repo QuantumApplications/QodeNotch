@@ -15,6 +15,7 @@ public actor SessionDiscovery {
         var git: GitSummary?
         var mainWorktree: String?
         var prUrl: String?
+        var forge: PullRequestService.Forge?
         var at: Date
     }
     private var slowCache: [String: SlowCache] = [:]
@@ -129,11 +130,12 @@ public actor SessionDiscovery {
             if let pane {
                 newTmux[pid] = pane.sessionName
                 let client = clients.first { $0.sessionName == pane.sessionName }
-                let app = client.map { TerminalDetector.findTerminal(from: $0.pid, in: tree) } ?? .unknown
-                names[pid] = app == .unknown ? "tmux" : "\(app.displayName) · tmux"
+                let r = client.map { TerminalDetector.resolve(from: $0.pid, in: tree) } ?? (.unknown, nil)
+                let name = r.app == .ide ? (r.host?.name ?? "IDE") : r.app.displayName
+                names[pid] = r.app == .unknown ? "tmux" : "\(name) · tmux"
             } else {
-                let app = TerminalDetector.findTerminal(from: pid, in: tree)
-                names[pid] = app == .unknown ? "" : app.displayName
+                let r = TerminalDetector.resolve(from: pid, in: tree)
+                names[pid] = r.app == .unknown ? "" : (r.app == .ide ? (r.host?.name ?? "IDE") : r.app.displayName)
             }
         }
         orphaned = newOrphaned
@@ -147,10 +149,11 @@ public actor SessionDiscovery {
         async let mainT = GitInfo.mainWorktree(cwd: cwd)
         let (git, main) = await (gitT, mainT)
         var pr: String?
+        let forge: PullRequestService.Forge? = git == nil ? nil : await PullRequestService.shared.forge(cwd: cwd)
         if let branch = git?.branch ?? branchHint, !["main", "master", "HEAD", "develop", "trunk"].contains(branch) {
             pr = await PullRequestService.shared.prUrl(cwd: cwd, branch: branch)
         }
-        let c = SlowCache(git: git, mainWorktree: main, prUrl: pr, at: Date())
+        let c = SlowCache(git: git, mainWorktree: main, prUrl: pr, forge: forge, at: Date())
         slowCache[cwd] = c
         return c
     }
@@ -220,6 +223,7 @@ public actor SessionDiscovery {
         session.model = TranscriptReader.model(tail) ?? TranscriptReader.model(head)
         session.desktopSessionId = hook?.desktopSessionId
         session.lastHookAt = hook?.timestamp
+        session.forge = slow.forge?.rawValue
         session.awaitingPermission = StatusClassifier.awaitsPermission(status: status, hookStatus: hook?.impliedStatus, hasPendingToolUse: pending)
         // Claude Desktop sessions have no terminal: "orphaned" doesn't apply.
         if session.isDesktop { session.orphaned = false }

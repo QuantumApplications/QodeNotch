@@ -89,9 +89,9 @@ struct SessionDetailView: View {
             }
             IconButton(symbol: "folder", help: "Finder", shortcut: "F") { store.openFinder(s) }
             if s.prUrl != nil {
-                IconButton(symbol: "arrow.up.right.square", help: "PR öffnen", shortcut: "P", tint: .green) { store.openPR(s) }
+                IconButton(symbol: "arrow.up.right.square", help: s.isGitLab ? "MR öffnen" : "PR öffnen", shortcut: "P", tint: .green) { store.openPR(s) }
             } else if s.canSendInput {
-                IconButton(symbol: "arrow.triangle.pull", help: "PR erstellen lassen", shortcut: "P") { store.createPR(s) }
+                IconButton(symbol: "arrow.triangle.pull", help: s.isGitLab ? "MR erstellen lassen" : "PR erstellen lassen", shortcut: "P") { store.createPR(s) }
             }
         }
     }
@@ -212,7 +212,7 @@ struct SessionDetailView: View {
                 Button { store.openURL(ticket) } label: { info("Ticket", s.taskSummary?.ticketId ?? ticket) }.buttonStyle(.plain)
             }
             if let url = s.prUrl, let pr = store.prStatuses[url] {
-                info("Pull Request", "#\(pr.number ?? "") · \(pr.state) · Checks \(pr.checksPassing)/\(pr.checksTotal)" + (pr.reviewDecision.map { " · \($0)" } ?? ""))
+                info(s.isGitLab ? "Merge Request" : "Pull Request", "\(s.isGitLab ? "!" : "#")\(pr.number ?? "") · \(pr.state) · Checks \(pr.checksPassing)/\(pr.checksTotal)" + (pr.reviewDecision.map { " · \($0)" } ?? ""))
             }
             HStack {
                 if s.pid != nil {

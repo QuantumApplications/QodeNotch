@@ -45,6 +45,51 @@ public enum ResumeStrategy: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// A global keyboard shortcut (Carbon key code + Carbon modifier mask).
+public struct HotKeySpec: Codable, Equatable, Sendable {
+    public var keyCode: Int
+    /// cmdKey 0x100, shiftKey 0x200, optionKey 0x800, controlKey 0x1000
+    public var modifiers: Int
+    /// Key label as typed, e.g. "I".
+    public var key: String
+
+    public init(keyCode: Int, modifiers: Int, key: String) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        self.key = key
+    }
+
+    public static let cmd = 0x100, shift = 0x200, option = 0x800, control = 0x1000
+
+    /// "⌃⌥⇧⌘I"
+    public var display: String {
+        var s = ""
+        if modifiers & Self.control != 0 { s += "⌃" }
+        if modifiers & Self.option != 0 { s += "⌥" }
+        if modifiers & Self.shift != 0 { s += "⇧" }
+        if modifiers & Self.cmd != 0 { s += "⌘" }
+        return s + key
+    }
+
+    // kVK_ANSI_I = 34, kVK_ANSI_A = 0, kVK_ANSI_D = 2
+    public static let defaultToggle = HotKeySpec(keyCode: 34, modifiers: cmd | shift, key: "I")
+    public static let defaultApprove = HotKeySpec(keyCode: 0, modifiers: cmd | shift, key: "A")
+    public static let defaultDeny = HotKeySpec(keyCode: 2, modifiers: cmd | shift, key: "D")
+}
+
+/// Where pull/merge requests come from.
+public enum ForgePreference: String, Codable, CaseIterable, Sendable {
+    case auto, github, gitlab
+
+    public var label: String {
+        switch self {
+        case .auto: return "Automatisch (nach Git-Remote)"
+        case .github: return "GitHub (gh)"
+        case .gitlab: return "GitLab (glab)"
+        }
+    }
+}
+
 public enum TmuxMode: String, Codable, CaseIterable, Sendable {
     case perProject = "per-project"
     case choose
@@ -100,6 +145,11 @@ public struct AppConfig: Codable, Equatable, Sendable {
     // Global hotkeys
     public var hotkeyToggle: Bool = true
     public var hotkeyApproveDeny: Bool = false
+    public var hotkeyToggleKey: HotKeySpec = .defaultToggle
+    public var hotkeyApproveKey: HotKeySpec = .defaultApprove
+    public var hotkeyDenyKey: HotKeySpec = .defaultDeny
+    public var forge: ForgePreference = .auto
+    public var createMrPrompt: String = AppConfig.defaultCreateMrPrompt
 
     public init() {}
 
@@ -108,6 +158,9 @@ public struct AppConfig: Codable, Equatable, Sendable {
 
     public static let defaultCreatePrPrompt =
         "Please commit all your changes with a descriptive commit message, push the branch to origin, and create a pull request. Include a clear title and description of what changed and why."
+
+    public static let defaultCreateMrPrompt =
+        "Please commit all your changes with a descriptive commit message, push the branch to origin, and create a GitLab merge request with `glab mr create`. Include a clear title and description of what changed and why."
 
     public static let editors: [EditorOption] = [
         .init(id: "none", label: "Keiner", command: "", appName: ""),
@@ -195,6 +248,11 @@ public struct AppConfig: Codable, Equatable, Sendable {
         launchAtLogin = d(.launchAtLogin, launchAtLogin)
         hotkeyToggle = d(.hotkeyToggle, hotkeyToggle)
         hotkeyApproveDeny = d(.hotkeyApproveDeny, hotkeyApproveDeny)
+        hotkeyToggleKey = d(.hotkeyToggleKey, hotkeyToggleKey)
+        hotkeyApproveKey = d(.hotkeyApproveKey, hotkeyApproveKey)
+        hotkeyDenyKey = d(.hotkeyDenyKey, hotkeyDenyKey)
+        forge = d(.forge, forge)
+        createMrPrompt = d(.createMrPrompt, createMrPrompt)
     }
 
     public static func load() -> AppConfig {

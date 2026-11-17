@@ -29,6 +29,10 @@ final class SessionStore: ObservableObject {
             try? config.save()
             configDidChange.send(config)
             if config.showLimits && !oldValue.showLimits { refreshLimits(force: true) }
+            if config.forge != oldValue.forge {
+                let forge = config.forge
+                Task { await PullRequestService.shared.setPreference(forge) }
+            }
         }
     }
     let configDidChange = PassthroughSubject<AppConfig, Never>()
@@ -63,6 +67,8 @@ final class SessionStore: ObservableObject {
 
     func start() {
         hookState = HookManager.install()
+        let forge = config.forge
+        Task { await PullRequestService.shared.setPreference(forge) }
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -275,7 +281,8 @@ final class SessionStore: ObservableObject {
             openURL(url)
             return
         }
-        send(s, message: config.createPrPrompt.isEmpty ? "/create-pr" : config.createPrPrompt)
+        let prompt = s.isGitLab ? config.createMrPrompt : config.createPrPrompt
+        send(s, message: prompt.isEmpty ? "/create-pr" : prompt)
     }
 
     func openEditor(_ s: ClaudeSession) {

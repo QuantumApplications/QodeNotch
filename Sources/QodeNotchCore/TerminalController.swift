@@ -179,8 +179,8 @@ public enum TerminalController {
                 let clients = await TerminalDetector.tmuxClients()
                 if let client = clients.first(where: { $0.sessionName == name }) {
                     let tree = await ProcessScanner.buildTree()
-                    let app = TerminalDetector.findTerminal(from: client.pid, in: tree)
-                    try? await adapterFocus(TerminalInfo(app: app, pid: client.pid, tty: client.tty))
+                    let r = TerminalDetector.resolve(from: client.pid, in: tree)
+                    try? await adapterFocus(TerminalInfo(app: r.app, pid: client.pid, tty: client.tty, hostApp: r.host))
                     return
                 }
                 // Detached session: attach it in a new terminal tab.
@@ -228,6 +228,8 @@ public enum TerminalController {
             }
         case .ghostty, .alacritty, .warp:
             _ = await Shell.run("/usr/bin/open", ["-a", info.app.appName], timeout: 5)
+        case .ide:
+            try await IDETerminal.focus(info)
         case .unknown:
             break
         }
@@ -258,6 +260,8 @@ public enum TerminalController {
                                       + AppleScript.systemEvents(process: "Terminal", "keystroke \"\(AppleScript.escape(text))\"\n    key code 36"))
         case .ghostty, .alacritty, .warp:
             try await genericSend(info, AppleScript.systemEvents(process: info.app.processName, "keystroke \"\(AppleScript.escape(text))\"\n    key code 36"))
+        case .ide:
+            try await IDETerminal.send(info, "keystroke \"\(AppleScript.escape(text))\"\n    key code 36")
         case .unknown:
             throw TerminalError.unsupported
         }
@@ -311,6 +315,8 @@ public enum TerminalController {
             try await genericSend(info, AppleScript.systemEvents(process: "cmux", key.systemEvents))
         case .ghostty, .alacritty, .warp:
             try await genericSend(info, AppleScript.systemEvents(process: info.app.processName, key.systemEvents))
+        case .ide:
+            try await IDETerminal.send(info, key.systemEvents)
         case .unknown:
             throw TerminalError.unsupported
         }
@@ -324,7 +330,7 @@ public enum TerminalController {
     private static func adapterCreate(_ command: String, terminal: TerminalApp, openIn: OpenIn, cwd: String) async throws {
         let asCmd = AppleScript.escape(command)
         switch terminal {
-        case .terminalApp, .unknown:
+        case .terminalApp, .ide, .unknown:
             let script = openIn == .tab ? """
             tell application "Terminal"
               activate
@@ -588,5 +594,94 @@ enum Cmux {
           end repeat
         end tell
         """
+    }
+}
+
+// MARK: - Integrated terminals of IDEs (PyCharm, IntelliJ, VS Code, Cursor …)
+
+/// IDEs have no scripting interface for their terminal tabs. QodeNotch raises
+/// the IDE window of the session's project and types via System Events into the
+/// focused component – but only when that component is not a code editor.
+public enum IDETerminal {
+    static func processRef(_ host: HostApp?) -> String {
+        if let pid = host?.pid { return "(first process whose unix id is \(pid))" }
+        return "(first process whose frontmost is true)"
+    }
+
+    static func focusScript(_ info: TerminalInfo) -> String {
+        let host = info.hostApp
+        let activate = host?.pid == nil ? "tell application \"\(AppleScript.escape(host?.name ?? "Terminal"))\" to activate\ndelay 0.2\n" : ""
+        let hints = info.projectHints.map { "\"\(AppleScript.escape($0))\"" }.joined(separator: ", ")
+        return activate + """
+        tell application "System Events"
+          set p to \(processRef(host))
+          set frontmost of p to true
+          set done to false
+          repeat with h in {\(hints)}
+            repeat with w in (windows of p)
+              try
+                if (name of w) contains (h as text) then
+                  perform action "AXRaise" of w
+                  set done to true
+                  exit repeat
+                end if
+              end try
+            end repeat
+            if done then exit repeat
+          end repeat
+        end tell
+        """
+    }
+
+    public static func focus(_ info: TerminalInfo) async throws {
+        try await AppleScript.run(focusScript(info))
+    }
+
+    /// Describes the focused UI element of the IDE (role, description, title).
+    static func focusedElementScript(_ host: HostApp?) -> String {
+        """
+        tell application "System Events"
+          set p to \(processRef(host))
+          set out to ""
+          try
+            set f to value of attribute "AXFocusedUIElement" of p
+            try
+              set out to out & (role of f) & " | "
+            end try
+            try
+              set out to out & (description of f) & " | "
+            end try
+            try
+              set out to out & (name of f) & " | "
+            end try
+            try
+              set out to out & (value of attribute "AXRoleDescription" of f)
+            end try
+          end try
+          return out
+        end tell
+        """
+    }
+
+    /// True when the focused element is clearly a code editor (typing there would edit code).
+    public static func isEditor(_ description: String) -> Bool {
+        let d = description.lowercased()
+        return d.contains("editor") && !d.contains("terminal")
+    }
+
+    public static func send(_ info: TerminalInfo, _ action: String) async throws {
+        try await focus(info)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let focused = try await AppleScript.run(focusedElementScript(info.hostApp))
+        if isEditor(focused) {
+            throw ActionError.message("In \(info.hostApp?.name ?? "der IDE") ist gerade der Editor aktiv – bitte einmal ins Terminal-Fenster mit Claude klicken und erneut versuchen.")
+        }
+        try await AppleScript.run("""
+        tell application "System Events"
+          tell \(processRef(info.hostApp))
+            \(action)
+          end tell
+        end tell
+        """)
     }
 }
