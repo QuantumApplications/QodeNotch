@@ -53,7 +53,13 @@ open /Applications/QodeNotch.app
 
 Zum Entwickeln: `swift run QodeNotch` (ohne App-Bundle funktionieren Mitteilungen und Login-Objekt nicht) und `swift test`.
 
-Fertige Builds liegen außerdem als Artefakt `QodeNotch.zip` an jedem Lauf der GitHub-Action **Build**. Die App ist nur ad-hoc signiert: beim ersten Start per Rechtsklick → *Öffnen* bestätigen.
+Fertige Builds liegen außerdem als Artefakt `QodeNotch.zip` an jedem Lauf der GitHub-Action **Build**. Die App ist nur ad-hoc signiert (nicht notarisiert). Heruntergeladene Builds blockiert Gatekeeper daher mit „Apple konnte nicht überprüfen …“. Abhilfe:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/QodeNotch.app
+```
+
+oder nach dem ersten Startversuch unter *Systemeinstellungen → Datenschutz & Sicherheit → Trotzdem öffnen*. Lokal mit `build-app.sh` gebaute Apps sind nicht betroffen.
 
 ### Berechtigungen
 
