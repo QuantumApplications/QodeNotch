@@ -1,9 +1,14 @@
 name: Build
 
+# Pull requests only. Pushes to main are built (and released) by release.yml,
+# so every commit triggers exactly one pipeline.
 on:
-  push:
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   macos:
