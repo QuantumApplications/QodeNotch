@@ -257,6 +257,11 @@ public actor SessionDiscovery {
         session.desktopSessionId = hook?.desktopSessionId
         session.lastHookAt = hook?.timestamp
         session.forge = slow.forge?.rawValue
+        var links: [String] = slow.prUrl.map { [$0] } ?? []
+        if let t = transcript {
+            for url in await SessionPRLinks.shared.links(transcript: t) where !links.contains(url) { links.append(url) }
+        }
+        session.linkedPRs = links
         session.awaitingPermission = StatusClassifier.awaitsPermission(status: status, hookStatus: hookStatus, hasPendingToolUse: pending)
         session.agent = agent
         // Claude Desktop sessions have no terminal: "orphaned" doesn't apply.

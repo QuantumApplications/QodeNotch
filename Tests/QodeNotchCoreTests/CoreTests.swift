@@ -762,3 +762,53 @@ final class SessionTitleTests: XCTestCase {
         XCTAssertEqual(name, "Renamed")
     }
 }
+
+final class PRLinkTests: XCTestCase {
+    func testExtractsMentionedLinks() {
+        let text = #"""
+        Created MR: https://gitlab.firma.de/team/backend/api/-/merge_requests/42 – see also
+        https://github.com/acme/app/pull/7. Old one: https://gitlab.com/x/y/-/merge_requests/3/diffs
+        Forgejo: https://codeberg.org/me/tool/pulls/5) and again https://gitlab.firma.de/team/backend/api/-/merge_requests/42
+        Not a MR: https://gitlab.com/x/y/-/merge_requests/new and https://github.com/acme/app/pulls
+        """#
+        XCTAssertEqual(PRLinkExtractor.urls(in: text), [
+            "https://github.com/acme/app/pull/7",
+            "https://gitlab.com/x/y/-/merge_requests/3",
+            "https://codeberg.org/me/tool/pulls/5",
+            "https://gitlab.firma.de/team/backend/api/-/merge_requests/42",
+        ])
+    }
+
+    func testTranscriptLinksIncrementalNewestFirst() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl").path
+        try (#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"https:\/\/gitlab.com\/a\/b\/-\/merge_requests\/1"}]}}"# + "\n")
+            .write(toFile: file, atomically: true, encoding: .utf8)
+        let links = SessionPRLinks()
+        var found = await links.links(transcript: file)
+        XCTAssertEqual(found, ["https://gitlab.com/a/b/-/merge_requests/1"])
+        let fh = try XCTUnwrap(FileHandle(forWritingAtPath: file))
+        fh.seekToEndOfFile()
+        fh.write(Data((#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"MR !2: https://gitlab.com/a/b/-/merge_requests/2"}]}}"# + "\n").utf8))
+        try fh.close()
+        found = await links.links(transcript: file)
+        XCTAssertEqual(found, ["https://gitlab.com/a/b/-/merge_requests/2", "https://gitlab.com/a/b/-/merge_requests/1"])
+    }
+
+    func testGitLabMRLocationAndPipelineFields() {
+        let mr = PullRequestService.gitLabMR("https://gitlab.firma.de:8443/team/backend/api/-/merge_requests/42")
+        XCTAssertEqual(mr?.host, "gitlab.firma.de:8443")
+        XCTAssertEqual(mr?.project, "team/backend/api")
+        XCTAssertEqual(mr?.iid, "42")
+        XCTAssertNil(PullRequestService.gitLabMR("https://gitlab.com/a/b/-/merge_requests/new"))
+
+        let view = #"{"state":"opened","draft":true,"title":"Add login","source_branch":"feat/login","web_url":"https://gitlab.com/a/b/-/merge_requests/42","head_pipeline":{"status":"failed","web_url":"https://gitlab.com/a/b/-/pipelines/999"}}"#
+        let s = PullRequestService.parseGitLabStatus(view: view, approvals: nil, discussions: nil, fallbackUrl: "")
+        XCTAssertEqual(s?.title, "Add login")
+        XCTAssertEqual(s?.sourceBranch, "feat/login")
+        XCTAssertEqual(s?.isDraft, true)
+        XCTAssertEqual(s?.pipelineStatus, "failed")
+        XCTAssertEqual(s?.pipelineUrl, "https://gitlab.com/a/b/-/pipelines/999")
+        XCTAssertEqual(s?.checks, .failing)
+        XCTAssertEqual(s?.reference, "!42")
+    }
+}

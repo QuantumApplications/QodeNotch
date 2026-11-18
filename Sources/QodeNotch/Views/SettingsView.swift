@@ -283,6 +283,7 @@ private struct ShortcutSettings: View {
                 shortcut("N", "Neue Session")
                 shortcut("H", "Alle Sessions (Verlauf)")
                 shortcut("U", "Limits & Nutzung")
+                shortcut("M", "Pull & Merge Requests aller Sessions")
                 shortcut("R", "Aktualisieren")
                 shortcut("esc, ←", "Zurück / schließen")
             }

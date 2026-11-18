@@ -185,6 +185,8 @@ struct ExpandedView: View {
                     HistoryView()
                 case .usage:
                     UsageView()
+                case .pullRequests:
+                    PullRequestsOverview()
                 }
             }
             .padding(.horizontal, 12)
@@ -234,6 +236,7 @@ struct ExpandedView: View {
                 LimitBadge()
                 IconButton(symbol: "plus", help: "Neue Session", shortcut: "N") { store.route = .newSession }
                 IconButton(symbol: "clock.arrow.circlepath", help: "Alle Sessions", shortcut: "H") { store.route = .history }
+                IconButton(symbol: "arrow.triangle.merge", help: "Pull & Merge Requests", shortcut: "M") { store.route = .pullRequests }
                 IconButton(symbol: "chart.bar", help: "Limits & Nutzung", shortcut: "U") { store.route = .usage }
                 IconButton(symbol: "arrow.clockwise", help: "Aktualisieren", shortcut: "R") { store.refreshNow() }
                 IconButton(symbol: "gearshape", help: "Einstellungen") { AppDelegate.shared?.openSettings() }

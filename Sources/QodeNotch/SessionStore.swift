@@ -10,6 +10,7 @@ enum NotchRoute: Equatable {
     case newSession
     case history
     case usage
+    case pullRequests
 }
 
 /// Central app state: polls sessions, tracks UI state, performs actions.
@@ -150,6 +151,11 @@ final class SessionStore: ObservableObject {
 
         detectTransitions(found)
         if found != sessions { sessions = found }
+        // A PR/MR just appeared (e.g. Claude ran `glab mr create`): fetch its status right away.
+        let unknown = sessions.contains { $0.linkedPRs.contains { prStatuses[$0] == nil } }
+        if unknown && Date().timeIntervalSince(lastPrRefresh) > 8 {
+            Task { await refreshPrStatuses() }
+        }
         if let sel = selectedId, !sessions.contains(where: { $0.id == sel }) { selectedId = sessions.first?.id }
         if case let .detail(id) = route, !sessions.contains(where: { $0.id == id }) { route = .list }
         isFirstPoll = false
@@ -176,16 +182,33 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    private var prRefreshInFlight = false
+    private var lastPrRefresh = Date.distantPast
+
+    /// Status of every PR/MR linked to a running session (branch PR + mentioned ones).
     private func refreshPrStatuses() async {
-        let targets = sessions.compactMap { s in s.prUrl.map { ($0, s.workingDirectory) } }
-        var result: [String: PrStatus] = [:]
+        guard !prRefreshInFlight else { return }
+        prRefreshInFlight = true
+        defer { prRefreshInFlight = false; lastPrRefresh = Date() }
+        var targets: [String: String] = [:]   // url → cwd to run gh/glab in
+        for s in sessions { for url in s.linkedPRs where targets[url] == nil { targets[url] = s.workingDirectory } }
+        var result = prStatuses.filter { targets[$0.key] != nil }
         await withTaskGroup(of: (String, PrStatus?).self) { group in
             for (url, cwd) in targets {
                 group.addTask { (url, await PullRequestService.shared.status(url: url, cwd: cwd)) }
             }
+            // A failed refresh keeps the last known status instead of blanking the row.
             for await (url, status) in group { if let status { result[url] = status } }
         }
         if result != prStatuses { prStatuses = result }
+    }
+
+    /// Reload PR/MR status now (force: bypass the 30 s cache).
+    func refreshPullRequests(force: Bool) {
+        Task {
+            if force { await PullRequestService.shared.invalidateStatuses() }
+            await refreshPrStatuses()
+        }
     }
 
     func refreshNow() {

@@ -154,7 +154,7 @@ public actor PullRequestService {
         } else if Self.isForgejoURL(url) {
             result = await ForgejoAPI.status(url: url)
         } else {
-            async let viewT = Shell.run("gh", ["pr", "view", url, "--json", "url,state,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus"], cwd: cwd, timeout: 10)
+            async let viewT = Shell.run("gh", ["pr", "view", url, "--json", "url,title,headRefName,isDraft,state,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus"], cwd: cwd, timeout: 10)
             async let threadsT = reviewThreads(url: url, cwd: cwd)
             let (view, threads) = await (viewT, threadsT)
             if view.ok, var s = Self.parseStatus(view.stdout, fallbackUrl: url) {
@@ -171,11 +171,26 @@ public actor PullRequestService {
 
     // MARK: GitLab
 
+    /// GitLab MR location from its web URL: host, project path and iid.
+    public static func gitLabMR(_ url: String) -> (host: String, project: String, iid: String)? {
+        guard let u = URL(string: url), let host = u.host,
+              let r = u.path.range(of: "/-/merge_requests/") else { return nil }
+        let project = String(u.path[u.path.index(after: u.path.startIndex)..<r.lowerBound])
+        let iid = String(u.path[r.upperBound...]).split(separator: "/").first.map(String.init) ?? ""
+        guard !project.isEmpty, Int(iid) != nil else { return nil }
+        return (u.port.map { "\(host):\($0)" } ?? host, project, iid)
+    }
+
     private func gitLabStatus(url: String, cwd: String) async -> PrStatus? {
-        guard let iid = url.split(separator: "/").last.map(String.init), Int(iid) != nil else { return nil }
-        async let viewT = Shell.run("glab", ["mr", "view", iid, "--output", "json"], cwd: cwd, timeout: 10)
-        async let approvalsT = Shell.run("glab", ["api", "projects/:id/merge_requests/\(iid)/approvals"], cwd: cwd, timeout: 10)
-        async let discussionsT = Shell.run("glab", ["api", "projects/:id/merge_requests/\(iid)/discussions?per_page=100"], cwd: cwd, timeout: 10)
+        // The MR may belong to any project (e.g. one mentioned in the session),
+        // so address it by its URL instead of the current repository.
+        guard let mr = Self.gitLabMR(url) else { return nil }
+        let repo = "https://\(mr.host)/\(mr.project)"
+        let encoded = mr.project.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? mr.project
+        let host = mr.host.split(separator: ":").first.map(String.init) ?? mr.host
+        async let viewT = Shell.run("glab", ["mr", "view", mr.iid, "-R", repo, "--output", "json"], cwd: cwd, timeout: 10)
+        async let approvalsT = Shell.run("glab", ["api", "--hostname", host, "projects/\(encoded)/merge_requests/\(mr.iid)/approvals"], cwd: cwd, timeout: 10)
+        async let discussionsT = Shell.run("glab", ["api", "--hostname", host, "projects/\(encoded)/merge_requests/\(mr.iid)/discussions?per_page=100"], cwd: cwd, timeout: 10)
         let (view, approvals, discussions) = await (viewT, approvalsT, discussionsT)
         guard view.ok else { return nil }
         return Self.parseGitLabStatus(view: view.stdout, approvals: approvals.ok ? approvals.stdout : nil,
@@ -217,12 +232,22 @@ public actor PullRequestService {
             if comments == 0 { comments = list.count }
         }
         let checkCount = checks == .none ? 0 : 1
-        return PrStatus(url: mr["web_url"] as? String ?? fallbackUrl, state: state, checks: checks, reviewDecision: review,
-                        mergeable: conflicts ? "CONFLICTING" : "MERGEABLE",
-                        mergeStateStatus: mr["detailed_merge_status"] as? String ?? "UNKNOWN",
-                        checksTotal: checkCount, checksPassing: checks == .passing ? 1 : 0,
-                        checksFailing: checks == .failing ? 1 : 0, checksPending: checks == .pending ? 1 : 0,
-                        unresolvedThreads: unresolved, commentCount: comments)
+        var status = PrStatus(url: mr["web_url"] as? String ?? fallbackUrl, state: state, checks: checks, reviewDecision: review,
+                              mergeable: conflicts ? "CONFLICTING" : "MERGEABLE",
+                              mergeStateStatus: mr["detailed_merge_status"] as? String ?? "UNKNOWN",
+                              checksTotal: checkCount, checksPassing: checks == .passing ? 1 : 0,
+                              checksFailing: checks == .failing ? 1 : 0, checksPending: checks == .pending ? 1 : 0,
+                              unresolvedThreads: unresolved, commentCount: comments)
+        status.title = mr["title"] as? String
+        status.sourceBranch = mr["source_branch"] as? String
+        status.isDraft = (mr["draft"] as? Bool) ?? (mr["work_in_progress"] as? Bool) ?? false
+        status.pipelineStatus = pipeline?["status"] as? String
+        status.pipelineUrl = (pipeline?["web_url"] as? String) ?? (status.url + "/pipelines")
+        return status
+    }
+
+    public func invalidateStatuses() {
+        statusCache.removeAll()
     }
 
     public func invalidate() {
@@ -249,10 +274,17 @@ public actor PullRequestService {
         }
         let checks: PrChecks = rollup.isEmpty ? .none : failing > 0 ? .failing : pending > 0 ? .pending : .passing
         let review = (obj["reviewDecision"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        return PrStatus(url: obj["url"] as? String ?? fallbackUrl, state: obj["state"] as? String ?? "OPEN", checks: checks,
+        let prUrl = obj["url"] as? String ?? fallbackUrl
+        var s = PrStatus(url: obj["url"] as? String ?? fallbackUrl, state: obj["state"] as? String ?? "OPEN", checks: checks,
                         reviewDecision: review, mergeable: obj["mergeable"] as? String ?? "UNKNOWN",
                         mergeStateStatus: obj["mergeStateStatus"] as? String ?? "UNKNOWN", checksTotal: rollup.count,
                         checksPassing: passing, checksFailing: failing, checksPending: pending)
+        s.title = obj["title"] as? String
+        s.sourceBranch = obj["headRefName"] as? String
+        s.isDraft = obj["isDraft"] as? Bool ?? false
+        s.pipelineStatus = rollup.isEmpty ? nil : checks.rawValue
+        s.pipelineUrl = prUrl + "/checks"
+        return s
     }
 
     static func parsePrUrl(_ url: String) -> (owner: String, repo: String, number: Int)? {

@@ -144,10 +144,16 @@ public enum ForgejoAPI {
         let review: String? = latest.values.contains("REQUEST_CHANGES") ? "CHANGES_REQUESTED"
             : latest.values.contains("APPROVED") ? "APPROVED" : nil
         let mergeable = pr["mergeable"] as? Bool
-        return PrStatus(url: pr["html_url"] as? String ?? fallbackUrl, state: state, checks: checks, reviewDecision: review,
+        var status = PrStatus(url: pr["html_url"] as? String ?? fallbackUrl, state: state, checks: checks, reviewDecision: review,
                         mergeable: mergeable == false && state == "OPEN" ? "CONFLICTING" : "MERGEABLE",
                         mergeStateStatus: "UNKNOWN", checksTotal: statuses.count, checksPassing: passing,
                         checksFailing: failing, checksPending: pending, unresolvedThreads: 0,
                         commentCount: pr["comments"] as? Int ?? 0)
+        status.title = pr["title"] as? String
+        status.sourceBranch = (pr["head"] as? [String: Any])?["ref"] as? String
+        status.isDraft = pr["draft"] as? Bool ?? false
+        status.pipelineStatus = statuses.isEmpty ? nil : ((combined?["state"] as? String) ?? checks.rawValue)
+        status.pipelineUrl = statuses.compactMap { $0["target_url"] as? String }.first { !$0.isEmpty }
+        return status
     }
 }

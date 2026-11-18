@@ -179,6 +179,12 @@ struct SessionDetailView: View {
 
     private var infoView: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if !s.linkedPRs.isEmpty {
+                Text(s.isGitLab ? "MERGE REQUESTS" : "PULL / MERGE REQUESTS")
+                    .scaledFont(size: 9, weight: .bold).foregroundStyle(Color.primary.opacity(0.45))
+                SessionPullRequests(session: s, limit: 20, compact: false)
+                    .padding(.bottom, 6)
+            }
             info("Agent", "\(s.agent.label) (\(s.agent.vendor))")
             if let m = s.model { info("Modell", "\(ModelName.pretty(m))  (\(m))") }
             if let name = s.sessionName { info("Session-Name", name) }

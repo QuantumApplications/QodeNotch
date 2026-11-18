@@ -18,6 +18,7 @@ struct SessionCardView: View {
             titleRow
             metaRow
             previewBlock
+            SessionPullRequests(session: s, limit: isSelected ? 5 : 2, compact: !isSelected)
             if s.awaitingPermission && s.canSendInput {
                 approvalRow
             } else if s.status == .waiting && s.isDesktop {
@@ -99,7 +100,6 @@ struct SessionCardView: View {
             }
             if s.isDesktop { Chip(text: "Claude Desktop", symbol: "macwindow", color: .purple, help: "Session aus dem Code-Tab von Claude Desktop") }
             if let git = s.git { GitStatsView(git: git) }
-            if let url = s.prUrl { PrBadge(url: url, status: store.prStatuses[url]) }
             Spacer(minLength: 0)
             if s.orphaned { Chip(text: s.tmuxSession != nil ? "tmux getrennt" : "verwaist", symbol: "link.badge.plus", color: .orange) }
             if let term = s.terminalName { Text(term).scaledFont(size: 9).foregroundStyle(Color.primary.opacity(0.3)).lineLimit(1) }

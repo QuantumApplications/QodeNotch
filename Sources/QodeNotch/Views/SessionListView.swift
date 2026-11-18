@@ -114,6 +114,7 @@ struct KeyboardHints: View {
             hint("E G F P", "Editor/Git/Finder/PR")
             hint("D", "Details")
             hint("H", "alle Sessions")
+            hint("M", "PRs/MRs")
             hint("U", "Limits")
             hint("esc", "schließen")
         }

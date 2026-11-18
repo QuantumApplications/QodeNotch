@@ -186,6 +186,9 @@ public struct ClaudeSession: Identifiable, Codable, Equatable, Sendable {
     public var lastHookAt: Date?
     /// "github" or "gitlab" – where pull/merge requests for this repo live.
     public var forge: String?
+    /// PR/MR links of this session: the branch's own PR/MR first, then every
+    /// PR/MR URL mentioned in the conversation (newest mention first).
+    public var linkedPRs: [String] = []
     /// Which CLI runs this session.
     public var agent: Agent = .claude
     public var isGitLab: Bool { forge == "gitlab" }
@@ -255,6 +258,14 @@ public struct PrStatus: Codable, Equatable, Sendable {
     public var checksPending: Int
     public var unresolvedThreads: Int
     public var commentCount: Int
+    /// Title of the PR/MR.
+    public var title: String?
+    public var sourceBranch: String?
+    public var isDraft: Bool = false
+    /// Raw CI status as reported by the forge (e.g. GitLab "running", "failed", "manual").
+    public var pipelineStatus: String?
+    /// Direct link to the pipeline / checks page.
+    public var pipelineUrl: String?
 
     public init(url: String, state: String, checks: PrChecks, reviewDecision: String?, mergeable: String,
                 mergeStateStatus: String, checksTotal: Int = 0, checksPassing: Int = 0, checksFailing: Int = 0,
@@ -275,6 +286,11 @@ public struct PrStatus: Codable, Equatable, Sendable {
 
     public var number: String? {
         url.split(separator: "/").last.map(String.init)
+    }
+
+    /// "!12" for GitLab merge requests, "#12" otherwise.
+    public var reference: String {
+        (url.contains("/merge_requests/") ? "!" : "#") + (number ?? "")
     }
 }
 

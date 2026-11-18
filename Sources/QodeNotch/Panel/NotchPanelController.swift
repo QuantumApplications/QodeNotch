@@ -325,6 +325,7 @@ final class NotchPanelController: NSObject {
         }
         if c == "h" { store.route = .history; return true }
         if c == "u" { store.route = .usage; return true }
+        if c == "m" { store.route = .pullRequests; return true }
         guard let s = selected else {
             if c == "n" { store.route = .newSession; return true }
             return false
