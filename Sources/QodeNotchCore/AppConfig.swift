@@ -140,6 +140,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var uiScale: Double = 1.0
     /// Fetch plan limits (5 h / weekly) with Claude Code's login.
     public var showLimits: Bool = true
+    /// Hide merged/closed PRs/MRs automatically (they can still be shown in the overview).
+    public var hideFinishedPRs: Bool = false
     public var resumeStrategy: ResumeStrategy = .auto
     public var launchAtLogin: Bool = false
 
@@ -267,6 +269,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         theme = d(.theme, theme)
         uiScale = min(max(d(.uiScale, uiScale), 0.8), 1.6)
         showLimits = d(.showLimits, showLimits)
+        hideFinishedPRs = d(.hideFinishedPRs, hideFinishedPRs)
         resumeStrategy = d(.resumeStrategy, resumeStrategy)
         launchAtLogin = d(.launchAtLogin, launchAtLogin)
         hotkeyToggle = d(.hotkeyToggle, hotkeyToggle)
@@ -298,6 +301,33 @@ public struct AppConfig: Codable, Equatable, Sendable {
 }
 
 /// User overrides for session titles/descriptions (`~/.qodenotch/session-meta.json`).
+/// PR/MR URLs the user hid (`~/.qodenotch/hidden-prs.json`).
+public enum HiddenPRStore {
+    static var file: String { Paths.appDir + "/hidden-prs.json" }
+
+    public static func load() -> Set<String> {
+        guard let data = FileManager.default.contents(atPath: file),
+              let list = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return Set(list)
+    }
+
+    public static func save(_ urls: Set<String>) throws {
+        Paths.ensureDirectory(Paths.appDir)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted]
+        try enc.encode(urls.sorted()).write(to: URL(fileURLWithPath: file), options: .atomic)
+    }
+
+    /// Which of `urls` to show: not hidden by hand and – if wanted – not merged/closed.
+    public static func visible(_ urls: [String], hidden: Set<String>, statuses: [String: PrStatus], hideFinished: Bool) -> [String] {
+        urls.filter { url in
+            if hidden.contains(url) { return false }
+            if hideFinished, let s = statuses[url], s.state == "MERGED" || s.state == "CLOSED" { return false }
+            return true
+        }
+    }
+}
+
 public enum SessionMetaStore {
     public struct Overrides: Codable, Equatable, Sendable {
         public var title: String?

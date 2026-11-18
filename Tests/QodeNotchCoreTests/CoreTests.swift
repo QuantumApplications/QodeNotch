@@ -812,3 +812,23 @@ final class PRLinkTests: XCTestCase {
         XCTAssertEqual(s?.reference, "!42")
     }
 }
+
+final class HiddenPRTests: XCTestCase {
+    func testVisibilityAndPersistence() throws {
+        let a = "https://gitlab.com/x/y/-/merge_requests/1"
+        let b = "https://gitlab.com/x/y/-/merge_requests/2"
+        let c = "https://gitlab.com/x/y/-/merge_requests/3"
+        let merged = PrStatus(url: c, state: "MERGED", checks: .passing, reviewDecision: nil, mergeable: "MERGEABLE", mergeStateStatus: "")
+        XCTAssertEqual(HiddenPRStore.visible([a, b, c], hidden: [b], statuses: [c: merged], hideFinished: false), [a, c])
+        XCTAssertEqual(HiddenPRStore.visible([a, b, c], hidden: [b], statuses: [c: merged], hideFinished: true), [a])
+
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        setenv("HOME", home, 1)
+        defer { unsetenv("HOME") }
+        XCTAssertEqual(HiddenPRStore.load(), [])
+        try HiddenPRStore.save([a, b])
+        XCTAssertEqual(HiddenPRStore.load(), [a, b])
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"hideFinishedPRs":true}"#.utf8))
+        XCTAssertTrue(config.hideFinishedPRs)
+    }
+}

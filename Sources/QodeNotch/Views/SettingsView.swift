@@ -137,6 +137,7 @@ private struct WorkflowSettings: View {
                     Text("Start-Prompt für neue Worktrees")
                     TextEditor(text: $store.config.initialPrompt).frame(height: 60).font(.system(size: 11))
                 }
+                Toggle("Gemergte und geschlossene PRs/MRs automatisch ausblenden", isOn: $store.config.hideFinishedPRs)
                 Picker("Pull/Merge Requests", selection: $store.config.forge) {
                     ForEach(ForgePreference.allCases, id: \.self) { Text($0.label).tag($0) }
                 }

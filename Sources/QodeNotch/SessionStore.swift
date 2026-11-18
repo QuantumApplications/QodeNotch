@@ -152,7 +152,7 @@ final class SessionStore: ObservableObject {
         detectTransitions(found)
         if found != sessions { sessions = found }
         // A PR/MR just appeared (e.g. Claude ran `glab mr create`): fetch its status right away.
-        let unknown = sessions.contains { $0.linkedPRs.contains { prStatuses[$0] == nil } }
+        let unknown = sessions.contains { $0.linkedPRs.contains { prStatuses[$0] == nil && !hiddenPRs.contains($0) } }
         if unknown && Date().timeIntervalSince(lastPrRefresh) > 8 {
             Task { await refreshPrStatuses() }
         }
@@ -182,6 +182,31 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    // MARK: Hidden PRs/MRs
+
+    @Published private(set) var hiddenPRs: Set<String> = HiddenPRStore.load()
+
+    /// PRs/MRs of a session that are shown (manual hides and the auto-hide setting applied).
+    func visiblePRs(_ s: ClaudeSession) -> [String] {
+        HiddenPRStore.visible(s.linkedPRs, hidden: hiddenPRs, statuses: prStatuses, hideFinished: config.hideFinishedPRs)
+    }
+
+    /// Linked to the session but currently not shown.
+    func hiddenLinkedPRs(_ s: ClaudeSession) -> [String] {
+        let visible = Set(visiblePRs(s))
+        return s.linkedPRs.filter { !visible.contains($0) }
+    }
+
+    func hidePR(_ url: String) { setHidden(url, true) }
+    func unhidePR(_ url: String) { setHidden(url, false) }
+
+    private func setHidden(_ url: String, _ hidden: Bool) {
+        var set = hiddenPRs
+        if hidden { set.insert(url) } else { set.remove(url) }
+        hiddenPRs = set
+        do { try HiddenPRStore.save(set) } catch { showToast(error.localizedDescription, error: true) }
+    }
+
     private var prRefreshInFlight = false
     private var lastPrRefresh = Date.distantPast
 
@@ -191,8 +216,10 @@ final class SessionStore: ObservableObject {
         prRefreshInFlight = true
         defer { prRefreshInFlight = false; lastPrRefresh = Date() }
         var targets: [String: String] = [:]   // url → cwd to run gh/glab in
-        for s in sessions { for url in s.linkedPRs where targets[url] == nil { targets[url] = s.workingDirectory } }
-        var result = prStatuses.filter { targets[$0.key] != nil }
+        for s in sessions { for url in s.linkedPRs where targets[url] == nil && !hiddenPRs.contains(url) { targets[url] = s.workingDirectory } }
+        // Keep the last status of hidden ones too, so they look right when shown again.
+        let linked = Set(sessions.flatMap(\.linkedPRs))
+        var result = prStatuses.filter { linked.contains($0.key) }
         await withTaskGroup(of: (String, PrStatus?).self) { group in
             for (url, cwd) in targets {
                 group.addTask { (url, await PullRequestService.shared.status(url: url, cwd: cwd)) }

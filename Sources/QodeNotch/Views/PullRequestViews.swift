@@ -52,6 +52,8 @@ struct PullRequestRow: View {
     var url: String
     var status: PrStatus?
     var compact = false
+    /// Shown although hidden (the "n ausgeblendet" list): offer to show it again.
+    var isHidden = false
 
     @EnvironmentObject private var store: SessionStore
     @State private var hovering = false
@@ -103,7 +105,21 @@ struct PullRequestRow: View {
                 }
                 pipelineButton(s)
             }
+            if hovering || isHidden {
+                Button {
+                    isHidden ? store.unhidePR(url) : store.hidePR(url)
+                } label: {
+                    Image(systemName: isHidden ? "eye" : "eye.slash")
+                        .scaledFont(size: 9.5, weight: .semibold)
+                        .foregroundStyle(Color.primary.opacity(0.55))
+                        .frame(width: 16, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isHidden ? "Wieder anzeigen" : "Ausblenden – nicht mehr relevant")
+            }
         }
+        .opacity(isHidden ? 0.55 : 1)
         .padding(.horizontal, 6)
         .padding(.vertical, compact ? 2.5 : 4)
         .background(Color.primary.opacity(hovering ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 6))
@@ -114,6 +130,12 @@ struct PullRequestRow: View {
         .contextMenu {
             Button(isMR ? "Merge Request öffnen" : "Pull Request öffnen") { store.openURL(url) }
             if let p = status?.pipelineUrl { Button("Pipeline öffnen") { store.openURL(p) } }
+            Divider()
+            if isHidden {
+                Button("Wieder anzeigen") { store.unhidePR(url) }
+            } else {
+                Button("Ausblenden") { store.hidePR(url) }
+            }
             Button("Link kopieren") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url, forType: .string)
@@ -147,19 +169,35 @@ struct SessionPullRequests: View {
     var limit: Int = 3
     var compact = true
 
+    /// Offer a "n ausgeblendet" toggle to bring hidden PRs/MRs back.
+    var allowShowingHidden = false
+
     @EnvironmentObject private var store: SessionStore
+    @State private var showHidden = false
 
     var body: some View {
-        if !session.linkedPRs.isEmpty {
+        let visible = store.visiblePRs(session)
+        let hidden = store.hiddenLinkedPRs(session)
+        if !visible.isEmpty || (allowShowingHidden && !hidden.isEmpty) {
             VStack(alignment: .leading, spacing: 3) {
-                ForEach(session.linkedPRs.prefix(limit), id: \.self) { url in
+                ForEach(visible.prefix(limit), id: \.self) { url in
                     PullRequestRow(url: url, status: store.prStatuses[url], compact: compact)
                 }
-                if session.linkedPRs.count > limit {
-                    Button("+ \(session.linkedPRs.count - limit) weitere") { store.openDetail(session.id) }
-                        .buttonStyle(.plain)
-                        .scaledFont(size: 9.5)
-                        .foregroundStyle(Color.primary.opacity(0.5))
+                HStack(spacing: 10) {
+                    if visible.count > limit {
+                        Button("+ \(visible.count - limit) weitere") { store.openDetail(session.id) }
+                    }
+                    if allowShowingHidden && !hidden.isEmpty {
+                        Button(showHidden ? "Ausgeblendete verbergen" : "\(hidden.count) ausgeblendet") { showHidden.toggle() }
+                    }
+                }
+                .buttonStyle(.plain)
+                .scaledFont(size: 9.5)
+                .foregroundStyle(Color.primary.opacity(0.5))
+                if showHidden {
+                    ForEach(hidden, id: \.self) { url in
+                        PullRequestRow(url: url, status: store.prStatuses[url], compact: compact, isHidden: true)
+                    }
                 }
             }
         }
@@ -200,7 +238,7 @@ struct PullRequestsOverview: View {
                                 }
                                 .contentShape(Rectangle())
                                 .onTapGesture { store.openDetail(s.id) }
-                                SessionPullRequests(session: s, limit: 10, compact: false)
+                                SessionPullRequests(session: s, limit: 10, compact: false, allowShowingHidden: true)
                             }
                         }
                     }
@@ -215,7 +253,7 @@ struct PullRequestsOverview: View {
     }
 
     private var summary: String {
-        let all = Set(sessions.flatMap(\.linkedPRs))
+        let all = Set(sessions.flatMap { store.visiblePRs($0) })
         let statuses = all.compactMap { store.prStatuses[$0] }
         let failing = statuses.filter { ["failed", "failure", "failing", "error"].contains(($0.pipelineStatus ?? "").lowercased()) }.count
         let open = statuses.filter { $0.state == "OPEN" }.count

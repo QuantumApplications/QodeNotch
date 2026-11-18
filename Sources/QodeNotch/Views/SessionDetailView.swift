@@ -182,7 +182,7 @@ struct SessionDetailView: View {
             if !s.linkedPRs.isEmpty {
                 Text(s.isGitLab ? "MERGE REQUESTS" : "PULL / MERGE REQUESTS")
                     .scaledFont(size: 9, weight: .bold).foregroundStyle(Color.primary.opacity(0.45))
-                SessionPullRequests(session: s, limit: 20, compact: false)
+                SessionPullRequests(session: s, limit: 20, compact: false, allowShowingHidden: true)
                     .padding(.bottom, 6)
             }
             info("Agent", "\(s.agent.label) (\(s.agent.vendor))")
