@@ -1,0 +1,30 @@
+name: PR title
+
+# The release workflow derives the version from commit messages. With squash
+# merges the PR title becomes that message, so it must follow Conventional
+# Commits: "fix: …" (patch), "feat: …" (minor), "feat!: …" (major).
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore

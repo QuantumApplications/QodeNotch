@@ -79,6 +79,27 @@ oder nach dem ersten Startversuch unter *Systemeinstellungen → Datenschutz & S
 
 Optional: `gh` bzw. `glab` (eingeloggt) für PR-/MR-Status, `tmux` für Steuerung ohne Fokuswechsel.
 
+## Releases, Signatur & Versionierung
+
+Jeder Merge nach `main` erzeugt automatisch ein Release (Workflow **Release**):
+
+1. **Version** aus den Commit-Nachrichten seit dem letzten Tag ([Conventional Commits](https://www.conventionalcommits.org/de/)): `fix:` → Patch (0.1.**1**), `feat:` → Minor (0.**2**.0), `feat!:` bzw. `BREAKING CHANGE:` → Major (**1**.0.0), alles andere → Patch. Bei Squash-Merges zählt der PR-Titel – der Workflow **PR title** prüft ihn.
+2. **Build**, signiert mit „Developer ID Application“, **notarisiert** und „gestapelt“ – Gatekeeper zeigt dann keine Warnung mehr.
+3. **Tag** `vX.Y.Z` und **GitHub Release** mit `QodeNotch-X.Y.Z.zip` und Changelog – herunterladbar ohne GitHub-Konto.
+
+Ohne die folgenden Secrets läuft der Workflow trotzdem, signiert dann aber nur ad-hoc. Einrichten unter *Settings → Secrets and variables → Actions*:
+
+| Secret | Inhalt |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Zertifikat „Developer ID Application“ inkl. privatem Schlüssel als .p12, Base64: `base64 -i cert.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE_PASSWORD` | Passwort der .p12-Datei |
+| `MACOS_SIGN_IDENTITY` | z. B. `Developer ID Application: Max Muster (AB12CD34EF)` (`security find-identity -v -p codesigning`) |
+| `NOTARY_KEY_P8` | App-Store-Connect-API-Schlüssel (*Benutzer und Zugriff → Integrationen → Schlüssel*, Rolle „Developer“), Base64 der `AuthKey_XXXX.p8` |
+| `NOTARY_KEY_ID` | Key-ID dieses Schlüssels |
+| `NOTARY_ISSUER_ID` | Issuer-ID (steht über der Schlüsselliste) |
+
+Voraussetzung ist eine Mitgliedschaft im Apple Developer Program. Lokal signieren: `SIGN_IDENTITY="Developer ID Application: …" ./scripts/build-app.sh`, notarisieren mit `scripts/notarize.sh`.
+
 ## Wie es funktioniert
 
 Beim Start installiert QodeNotch ein kleines Shell-Skript (`~/.claude/qodenotch/status-hook.sh`) als Hook in `~/.claude/settings.json` (bestehende Hooks bleiben erhalten, einmaliges Backup als `settings.json.qodenotch-backup`). Bei jedem Ereignis (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`, …) schreibt es den Hook-Payload nach `~/.claude/qodenotch/events/<claude-pid>.json` (in Containern `c-<session-id>.json`). Die App fragt jede Sekunde Prozesse, Hook-Dateien und die Enden der JSONL-Transcripts ab – es gibt keine Datenbank, alles wird jedes Mal neu berechnet. Freigaben werden als Tastendruck (↩ / Esc / „2“) an das jeweilige Terminal bzw. die tmux-Pane geschickt.
