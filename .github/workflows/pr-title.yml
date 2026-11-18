@@ -1,0 +1,34 @@
+name: PR title
+
+# Re-checks only the PR title when the PR is edited (title or description).
+# Commits are checked by the pr-title job of the Build workflow, so a PR edit
+# never starts – or hides – a build.
+on:
+  pull_request:
+    types: [edited]
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore

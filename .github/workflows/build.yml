@@ -4,13 +4,11 @@ name: Build
 # so every commit triggers exactly one pipeline.
 on:
   pull_request:
-    # "edited" = PR title changed: only the title check runs then.
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
-  # A title edit must not cancel a running build of the same PR.
-  group: build-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
+  group: build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -41,7 +39,6 @@ jobs:
             chore
 
   macos:
-    if: github.event.action != 'edited'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +58,6 @@ jobs:
           path: build/QodeNotch.zip
 
   linux-core:
-    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     container: swift:6.0-noble
     steps:
