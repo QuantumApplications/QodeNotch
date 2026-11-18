@@ -41,8 +41,10 @@ public struct TranscriptLine {
     public var cwd: String?
     /// Text of a `{"type":"summary"}` line (session title written by Claude Code).
     public var summary: String?
-    /// Name given with `/rename` (stored as a `customTitle` line).
+    /// Name given with `/rename` (`{"type":"custom-title","customTitle":…}`).
     public var customTitle: String?
+    /// Title Claude Code generates itself (`{"type":"ai-title","aiTitle":…}`).
+    public var aiTitle: String?
     public var gitBranch: String?
     public var timestamp: String?
     public var role: String?
@@ -61,6 +63,7 @@ public struct TranscriptLine {
         cwd = json["cwd"] as? String
         summary = json["summary"] as? String
         customTitle = (json["customTitle"] as? String) ?? (json["custom_title"] as? String)
+        aiTitle = (json["aiTitle"] as? String) ?? (json["ai_title"] as? String)
         gitBranch = json["gitBranch"] as? String
         timestamp = json["timestamp"] as? String
         isMeta = json["isMeta"] as? Bool ?? false
@@ -77,6 +80,7 @@ public struct TranscriptLine {
     var blocks: [[String: Any]]? { content as? [[String: Any]] }
     var isNoise: Bool {
         type == "progress" || type == "file-history-snapshot" || type == "system" || type == "summary" || type == "custom-title"
+            || type == "ai-title" || type == "last-prompt"
     }
 }
 
@@ -196,9 +200,28 @@ public enum TranscriptReader {
     }
 
     /// Name of the session: `/rename` title, else Claude Code's summary.
-    public static func sessionName(_ lines: [TranscriptLine]) -> String? {
-        if let t = lines.last(where: { !($0.customTitle ?? "").isEmpty })?.customTitle { return t }
-        return lines.last(where: { $0.type == "summary" && !($0.summary ?? "").isEmpty })?.summary
+    /// Name of the session as Claude Code shows it: `/rename` title, else its
+    /// generated title. Entries carrying another session's id (left behind by
+    /// `/clear` or `/resume` forks) are ignored. `summary` lines are not used:
+    /// they often describe other sessions of the same folder.
+    public static func sessionName(_ lines: [TranscriptLine], sessionId: String? = nil) -> String? {
+        func belongs(_ l: TranscriptLine) -> Bool { sessionId == nil || l.sessionId == nil || l.sessionId == sessionId }
+        if let t = lines.last(where: { !($0.customTitle ?? "").isEmpty && belongs($0) })?.customTitle { return t }
+        return lines.last(where: { !($0.aiTitle ?? "").isEmpty && belongs($0) })?.aiTitle
+    }
+
+    /// Scan a whole file for title lines (they may sit anywhere in a long transcript).
+    public static func titleLines(in data: Data) -> [TranscriptLine] {
+        var out: [TranscriptLine] = []
+        for raw in data.split(separator: 0x0A) {
+            // Cheap byte check before JSON parsing: only title records matter here.
+            guard raw.count < 4000, String(decoding: raw.prefix(200), as: UTF8.self).contains("title\"") else { continue }
+            if let obj = (try? JSONSerialization.jsonObject(with: Data(raw))) as? [String: Any] {
+                let l = TranscriptLine(json: obj)
+                if l.customTitle != nil || l.aiTitle != nil { out.append(l) }
+            }
+        }
+        return out
     }
 
     /// Model of the latest real assistant response.

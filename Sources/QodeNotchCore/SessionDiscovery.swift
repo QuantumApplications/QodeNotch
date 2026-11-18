@@ -71,6 +71,20 @@ public actor SessionDiscovery {
             if let t = ev.transcriptPath { claimed.insert(HookManager.hostTranscriptPath(t)) }
         }
 
+        // Fallback transcripts are assigned one after another – newest process
+        // (highest PID) gets the newest transcript – so several sessions in the
+        // same folder never share one transcript.
+        var transcriptFor: [Int32: String] = [:]
+        for pid in pids.reversed() {
+            if let t = hookFor[pid]?.transcriptPath { transcriptFor[pid] = HookManager.hostTranscriptPath(t); continue }
+            guard let cwd = cwds[pid] ?? hookFor[pid]?.cwd else { continue }
+            let agent = agentOf[pid] ?? .claude
+            if let t = AgentStores.latestTranscript(agent: agent, cwd: cwd, excluding: claimed) {
+                transcriptFor[pid] = t
+                claimed.insert(t)
+            }
+        }
+
         var sessions: [ClaudeSession] = []
         await withTaskGroup(of: ClaudeSession?.self) { group in
             for pid in pids {
@@ -79,9 +93,9 @@ public actor SessionDiscovery {
                 let hook = hookFor[pid]
                 let container = containers[pid]
                 let agent = agentOf[pid] ?? hook?.agent ?? .claude
-                let claimedCopy = claimed
+                let transcript = transcriptFor[pid]
                 group.addTask {
-                    await self.build(pid: pid, agent: agent, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, container: container, claimed: claimedCopy)
+                    await self.build(pid: pid, agent: agent, cwd: cwd, cpu: entry?.cpuPercent ?? 0, hook: hook, container: container, transcript: transcript)
                 }
             }
             for await s in group { if let s { sessions.append(s) } }
@@ -169,9 +183,7 @@ public actor SessionDiscovery {
     }
 
     private func build(pid: Int32, agent: Agent, cwd: String, cpu: Double, hook: HookEvent?, container: ProcessScanner.ContainerClient?,
-                       claimed: Set<String>) async -> ClaudeSession? {
-        let transcript = hook?.transcriptPath.map(HookManager.hostTranscriptPath)
-            ?? AgentStores.latestTranscript(agent: agent, cwd: cwd, excluding: claimed)
+                       transcript: String?) async -> ClaudeSession? {
 
         var tail: [TranscriptLine] = []
         var head: [TranscriptLine] = []
@@ -236,7 +248,11 @@ public actor SessionDiscovery {
             containerName: container?.containerName,
             containerRuntime: container?.runtime
         )
-        session.sessionName = TranscriptReader.sessionName(allLines)
+        if let t = transcript, agent == .claude {
+            session.sessionName = await SessionTitles.shared.name(transcript: t, sessionId: session.id)
+        } else {
+            session.sessionName = TranscriptReader.sessionName(allLines, sessionId: session.id)
+        }
         session.model = TranscriptReader.model(tail) ?? TranscriptReader.model(head)
         session.desktopSessionId = hook?.desktopSessionId
         session.lastHookAt = hook?.timestamp

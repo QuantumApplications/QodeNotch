@@ -32,7 +32,13 @@ final class NotchLayout: ObservableObject {
     static let shadowPadding: CGFloat = 24
 
     func collapsedSize(hasSessions: Bool) -> CGSize {
-        let wings = hasSessions || !geometry.hasNotch ? Self.wingWidth * 2 : 0
+        if !geometry.hasNotch {
+            // No camera housing in the way: a wider bar with room for the session name.
+            let width = hasSessions ? min(440, max(geometry.notchWidth + Self.wingWidth * 2, geometry.screenFrame.width * 0.28))
+                                    : geometry.notchWidth + Self.wingWidth * 2
+            return CGSize(width: width, height: geometry.notchHeight)
+        }
+        let wings = hasSessions ? Self.wingWidth * 2 : 0
         return CGSize(width: geometry.notchWidth + wings, height: geometry.notchHeight)
     }
 }

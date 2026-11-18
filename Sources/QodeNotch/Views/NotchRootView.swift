@@ -16,6 +16,12 @@ struct NotchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
+    /// Concave "ears" only make sense where they meet a hardware notch.
+    private func topRadius(_ expanded: Bool) -> CGFloat {
+        guard layout.geometry.hasNotch else { return 2 }
+        return expanded ? 10 : 6
+    }
+
     /// Color scheme of the expanded panel. The collapsed notch always stays
     /// dark so it blends into the hardware notch.
     private var expandedScheme: ColorScheme {
@@ -50,14 +56,14 @@ struct NotchRootView: View {
         }
         .frame(width: expanded ? store.config.scaledExpandedWidth : collapsed.width + hoverGrow)
         .background(
-            NotchShape(topRadius: expanded ? 10 : 6, bottomRadius: expanded ? 22 : 10)
+            NotchShape(topRadius: topRadius(expanded), bottomRadius: expanded ? 22 : 10)
                 .fill(light ? Color(white: 0.965) : Color.black)
         )
         .overlay(
-            NotchShape(topRadius: 10, bottomRadius: 22)
+            NotchShape(topRadius: topRadius(true), bottomRadius: 22)
                 .stroke(Color.black.opacity(light ? 0.12 : 0), lineWidth: 1)
         )
-        .clipShape(NotchShape(topRadius: expanded ? 10 : 6, bottomRadius: expanded ? 22 : 10))
+        .clipShape(NotchShape(topRadius: topRadius(expanded), bottomRadius: expanded ? 22 : 10))
         .measureHeight { h in
             if expanded, abs(layout.expandedContentHeight - h) > 0.5 { layout.expandedContentHeight = h }
         }
@@ -76,12 +82,61 @@ struct CollapsedView: View {
     @EnvironmentObject private var layout: NotchLayout
 
     var body: some View {
+        if layout.geometry.hasNotch { notchLayout } else { barLayout }
+    }
+
+    /// The session that the collapsed bar talks about.
+    private var focusSession: ClaudeSession? {
         let live = store.liveSessions
-        HStack(spacing: 0) {
+        return live.first(where: { $0.status == .waiting }) ?? live.first(where: { $0.status == .working }) ?? live.first
+    }
+
+    /// Screens without a notch: one continuous bar, nothing hidden behind a camera.
+    private var barLayout: some View {
+        HStack(spacing: 7) {
+            StatusOrb(status: store.aggregateStatus, size: 9)
+            if let s = focusSession {
+                (Text(s.repoName).fontWeight(.semibold)
+                 + Text(s.sessionLabel.map { "  ·  " + $0 } ?? "").foregroundColor(Color.primary.opacity(0.6)))
+                    .scaledFont(size: 11)
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else {
+                Text("QodeNotch").scaledFont(size: 11, weight: .semibold).foregroundStyle(Color.primary.opacity(0.6))
+            }
+            Spacer(minLength: 6)
+            counters
+        }
+        .padding(.horizontal, 16)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private var counters: some View {
+        let live = store.liveSessions
+        return HStack(spacing: 5) {
+            if store.waitingCount > 0 {
+                Image(systemName: "hand.raised.fill").scaledFont(size: 9)
+                Text("\(store.waitingCount)").scaledFont(size: 11, weight: .bold, design: .rounded)
+            } else if store.workingCount > 0 {
+                ProgressView().controlSize(.mini).tint(SessionStatus.working.color).scaleEffect(0.7)
+                Text("\(store.workingCount)").scaledFont(size: 11, weight: .bold, design: .rounded)
+            } else if !live.isEmpty {
+                Text("\(live.count)").scaledFont(size: 11, weight: .bold, design: .rounded)
+            }
+        }
+        .foregroundStyle(store.waitingCount > 0 ? SessionStatus.waiting.color : Color.primary.opacity(0.8))
+    }
+
+    /// Real notch: status on the left wing, counters on the right wing.
+    private var notchLayout: some View {
+        let live = store.liveSessions
+        return HStack(spacing: 0) {
             HStack(spacing: 6) {
-                if !live.isEmpty || !layout.geometry.hasNotch {
+                if !live.isEmpty {
                     StatusOrb(status: store.aggregateStatus, size: 9)
-                    if let s = live.first(where: { $0.status == .waiting }) ?? live.first {
+                    if let s = focusSession {
                         Text(s.repoName)
                             .scaledFont(size: 10, weight: .semibold)
                             .foregroundStyle(Color.primary.opacity(0.75))
@@ -95,18 +150,7 @@ struct CollapsedView: View {
 
             Spacer(minLength: layout.geometry.notchWidth - 20)
 
-            HStack(spacing: 5) {
-                if store.waitingCount > 0 {
-                    Image(systemName: "hand.raised.fill").scaledFont(size: 9)
-                    Text("\(store.waitingCount)").scaledFont(size: 11, weight: .bold, design: .rounded)
-                } else if store.workingCount > 0 {
-                    ProgressView().controlSize(.mini).tint(SessionStatus.working.color).scaleEffect(0.7)
-                    Text("\(store.workingCount)").scaledFont(size: 11, weight: .bold, design: .rounded)
-                } else if !live.isEmpty {
-                    Text("\(live.count)").scaledFont(size: 11, weight: .bold, design: .rounded)
-                }
-            }
-            .foregroundStyle(store.waitingCount > 0 ? SessionStatus.waiting.color : Color.primary.opacity(0.8))
+            counters
             .padding(.trailing, 14)
             .frame(width: NotchLayout.wingWidth + 10, alignment: .trailing)
         }
@@ -157,7 +201,8 @@ struct ExpandedView: View {
                     .transition(.opacity)
             }
         }
-        .padding(.horizontal, 10)
+        // The shape's side walls sit `topRadius` inside the frame: keep content clear of them.
+        .padding(.horizontal, layout.geometry.hasNotch ? 14 : 8)
         .animation(.easeInOut(duration: 0.2), value: store.route)
         .animation(.easeInOut(duration: 0.2), value: store.toast)
     }

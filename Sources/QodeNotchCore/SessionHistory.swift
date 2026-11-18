@@ -81,7 +81,9 @@ public actor SessionHistory {
         }
         let cwd = all.lazy.compactMap(\.cwd).first { !$0.isEmpty }
         // A `summary` line (written on compaction/resume) is a better title than the first prompt.
-        let summaryLine = TranscriptReader.sessionName(all)
+        let fileSessionId = agent == .claude ? url.deletingPathExtension().lastPathComponent : nil
+        let titleSource = agent == .claude ? (FileManager.default.contents(atPath: path).map(TranscriptReader.titleLines(in:)) ?? all) : all
+        let summaryLine = TranscriptReader.sessionName(titleSource, sessionId: fileSessionId)
         return PastSession(
             id: fileId,
             agent: agent,

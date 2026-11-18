@@ -363,7 +363,8 @@ final class HistoryTests: XCTestCase {
 
         let old = #"{"type":"user","sessionId":"aaaa-1","cwd":"\#(project)","gitBranch":"main","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Add login page\nwith OAuth"}}"#
         let new = #"""
-        {"type":"summary","summary":"Refactor database layer","leafUuid":"x"}
+        {"type":"summary","summary":"Some other session","leafUuid":"x"}
+        {"type":"ai-title","sessionId":"bbbb-2","aiTitle":"Refactor database layer"}
         {"type":"user","sessionId":"bbbb-2","cwd":"\#(project)","gitBranch":"feat/db","message":{"role":"user","content":"Refactor the db"}}
         """#
         let empty = #"{"type":"system","sessionId":"cccc-3","cwd":"\#(project)"}"#
@@ -727,5 +728,37 @@ final class ForgejoTests: XCTestCase {
         XCTAssertEqual(s.mergeable, "CONFLICTING")
         XCTAssertEqual(s.reviewDecision, "CHANGES_REQUESTED")
         XCTAssertEqual(s.number, "5")
+    }
+}
+
+final class SessionTitleTests: XCTestCase {
+    func testAiAndCustomTitlesWithSessionIds() async throws {
+        let jsonl = #"""
+        {"type":"summary","summary":"Title of ANOTHER session","leafUuid":"x"}
+        {"type":"user","sessionId":"s1","message":{"role":"user","content":"please refactor the parser"}}
+        {"type":"ai-title","sessionId":"old","aiTitle":"Carried over from /clear"}
+        {"type":"ai-title","sessionId":"s1","aiTitle":"Parser refactoring"}
+        """#
+        let lines = TranscriptReader.parse(jsonl)
+        XCTAssertEqual(TranscriptReader.sessionName(lines, sessionId: "s1"), "Parser refactoring")
+        XCTAssertEqual(TranscriptReader.sessionName(lines + TranscriptReader.parse(#"{"type":"custom-title","sessionId":"s1","customTitle":"Mein Name"}"#), sessionId: "s1"), "Mein Name")
+        // summary lines are never used as the name
+        XCTAssertNil(TranscriptReader.sessionName(TranscriptReader.parse(#"{"type":"summary","summary":"x"}"#), sessionId: "s1"))
+
+        // Titles in the middle of a big file are found, incrementally.
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl").path
+        var big = #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"hi"}}"# + "\n"
+        big += #"{"type":"ai-title","sessionId":"s1","aiTitle":"Early title"}"# + "\n"
+        for i in 0..<2000 { big += #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"line \#(i)"}]}}"# + "\n" }
+        try big.write(toFile: file, atomically: true, encoding: .utf8)
+        let titles = SessionTitles()
+        var name = await titles.name(transcript: file, sessionId: "s1")
+        XCTAssertEqual(name, "Early title")
+        let fh = try XCTUnwrap(FileHandle(forWritingAtPath: file))
+        fh.seekToEndOfFile()
+        fh.write(Data((#"{"type":"custom-title","sessionId":"s1","customTitle":"Renamed"}"# + "\n").utf8))
+        try fh.close()
+        name = await titles.name(transcript: file, sessionId: "s1")
+        XCTAssertEqual(name, "Renamed")
     }
 }
