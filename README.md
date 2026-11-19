@@ -84,7 +84,7 @@ Optional: `gh` bzw. `glab` (eingeloggt) für PR-/MR-Status, `tmux` für Steuerun
 
 Jeder Merge nach `main` erzeugt automatisch ein Release (Workflow **Release**):
 
-1. **Version** aus den Commit-Nachrichten seit dem letzten Tag ([Conventional Commits](https://www.conventionalcommits.org/de/)): `fix:` → Patch (0.1.**1**), `feat:` → Minor (0.**2**.0), `feat!:` bzw. `BREAKING CHANGE:` → Major (**1**.0.0), alles andere → Patch. Bei Squash-Merges zählt der PR-Titel – der Job **pr-title** im Workflow **Build** prüft ihn.
+1. **Version** aus den Commit-Nachrichten seit dem letzten Tag (`scripts/next-version.sh`, [Conventional Commits](https://www.conventionalcommits.org/de/)): Das erste Release ist **1.0.0**, danach `fix:` → Patch (1.0.**1**), `feat:` → Minor (1.**1**.0), `feat!:` bzw. `BREAKING CHANGE:` → Major (**2**.0.0), alles andere → Patch. Ohne neue Commits seit dem letzten Tag entsteht kein Release. Bei Squash-Merges zählt der PR-Titel – der Job **pr-title** im Workflow **Build** prüft ihn.
 2. **Build**, signiert mit „Developer ID Application“, **notarisiert** und „gestapelt“ – Gatekeeper zeigt dann keine Warnung mehr.
 3. **Tag** `vX.Y.Z` und **GitHub Release** mit `QodeNotch-X.Y.Z.zip` und Changelog – herunterladbar ohne GitHub-Konto.
 
