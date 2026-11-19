@@ -1,0 +1,68 @@
+name: Build
+
+# Pull requests only. Pushes to main are built (and released) by release.yml,
+# so every commit triggers exactly one pipeline.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # The release workflow derives the version from commit messages. With squash
+  # merges the PR title becomes that message, so it must follow Conventional
+  # Commits: "fix: …" (patch), "feat: …" (minor), "feat!: …" (major).
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Toolchain
+        run: swift --version
+      - name: Test core
+        run: swift test
+      - name: Build app bundle
+        run: ./scripts/build-app.sh
+      - name: Zip app
+        run: cd build && ditto -c -k --keepParent QodeNotch.app QodeNotch.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QodeNotch
+          path: build/QodeNotch.zip
+
+  linux-core:
+    runs-on: ubuntu-latest
+    container: swift:6.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install procps
+        run: apt-get update -qq && apt-get install -y -qq procps
+      - name: Test core
+        run: swift test
